@@ -9,3 +9,4 @@ hex = "0.4.3"
 thiserror = "1.0.50"
 anyhow = "1.0.75"
 sha2 = "0.10.8"
+sv = { git = "https://github.com/murphsicles/rust-sv", tag = "v0.5.2" }
