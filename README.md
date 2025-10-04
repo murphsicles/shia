@@ -1,7 +1,9 @@
 # Shia - The BSV BEEF Protocol Reference Implementation 🚀
 
+# Shia 🚀
+
 [![Crates.io](https://img.shields.io/crates/v/shia.svg)](https://crates.io/crates/shia)
-[![Documentation](https://img.shields.io/docsrs/shia.svg)](https://docs.rs/shia)
+[![Dependencies](https://deps.rs/repo/github/murphsicles/shia/status.svg)](https://deps.rs/repo/github/murphsicles/shia)
 [![Rust](https://img.shields.io/badge/rust-1.82.0-blue.svg)](https://www.rust-lang.org/)
 [![CI](https://img.shields.io/github/actions/workflow/status/murphsicles/shia/ci.yml?branch=main)](https://github.com/murphsicles/shia/actions/workflows/ci.yml)
 
