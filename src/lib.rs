@@ -563,47 +563,74 @@ mod tests {
         expected_arr.copy_from_slice(&expected_txid);
         assert_eq!(tx.txid(), expected_arr);
     }
-
+    
     #[test]
-    fn transaction_verify_scripts() {
-        // Simple P2PKH from rust-sv tests
-        let private_key = [1u8; 32];
-        let secp = Secp256k1::new();
-        let secret_key = SecretKey::from_byte_array(&private_key).unwrap();
-        let public_key = PublicKey::from_secret_key(&secp, &secret_key);
-        let pk_bytes = public_key.serialize();
-        let pkh = hash160(&pk_bytes);
+fn transaction_verify_scripts() {
+    // Simple P2PKH from rust-sv tests
+    let private_key = [1u8; 32];
+    let secp = Secp256k1::new();
+    let secret_key = SecretKey::from_byte_array(private_key).unwrap();
+    let public_key = PublicKey::from_secret_key(&secp, &secret_key);
+    let pk_bytes = public_key.serialize();
+    let pkh = hash160(&pk_bytes);
 
-        let mut lock_script = SvScript::new();
-        lock_script.append(sv::script::op_codes::OP_DUP);
-        lock_script.append(sv::script::op_codes::OP_HASH160);
-        lock_script.append_data(&pkh.0);
-        lock_script.append(sv::script::op_codes::OP_EQUALVERIFY);
-        lock_script.append(sv::script::op_codes::OP_CHECKSIG);
+    let mut lock_script = SvScript::new();
+    lock_script.append(sv::script::op_codes::OP_DUP);
+    lock_script.append(sv::script::op_codes::OP_HASH160);
+    lock_script.append_data(&pkh.0);
+    lock_script.append(sv::script::op_codes::OP_EQUALVERIFY);
+    lock_script.append(sv::script::op_codes::OP_CHECKSIG);
 
-        let tx1 = SvTx {
-            version: 1,
-            inputs: vec![],
-            outputs: vec![SvTxOut {
-                satoshis: 10,
-                lock_script,
-            }],
-            lock_time: 0,
-        };
+    let tx1 = SvTx {
+        version: 1,
+        inputs: vec![],
+        outputs: vec![SvTxOut {
+            satoshis: 10,
+            lock_script,
+        }],
+        lock_time: 0,
+    };
 
-        let mut tx2 = SvTx {
-            version: 1,
-            inputs: vec![SvTxIn {
-                prev_output: OutPoint {
-                    hash: SvHash256(tx1.hash().0),
-                    index: 0,
-                },
-                unlock_script: SvScript(vec![]),
-                sequence: 0xffffffff,
-            }],
-            outputs: vec![],
-            lock_time: 0,
-        };
+    let mut tx2 = SvTx {
+        version: 1,
+        inputs: vec![SvTxIn {
+            prev_output: OutPoint {
+                hash: SvHash256(tx1.hash().0),
+                index: 0,
+            },
+            unlock_script: SvScript(vec![]),
+            sequence: 0xffffffff,
+        }],
+        outputs: vec![],
+        lock_time: 0,
+    };
+
+    let mut cache = SigHashCache::new();
+    let lock_script_bytes = &tx1.outputs[0].lock_script.0;
+    let sighash_type = sv::transaction::sighash::SIGHASH_ALL | sv::transaction::sighash::SIGHASH_FORKID;
+    let sig_hash = sv::transaction::sighash::sighash(&tx2, 0, lock_script_bytes, 10, sighash_type, &mut cache).unwrap();
+    let signature = sv::transaction::generate_signature(&private_key, &sig_hash, sighash_type).unwrap();
+
+    let mut unlock_script = SvScript::new();
+    unlock_script.append_data(&signature);
+    unlock_script.append_data(&pk_bytes);
+    tx2.inputs[0].unlock_script = unlock_script;
+
+    let mut tx2_bytes = Vec::new();
+    tx2.write(&mut tx2_bytes).unwrap();
+
+    let our_tx = Transaction::from_raw(&tx2_bytes).unwrap();
+    let prev_txid = our_tx.inputs[0].prev_txid;
+    let prev_vout = our_tx.inputs[0].vout;
+    let prev_output = Output {
+        value: 10,
+        script_pubkey: tx1.outputs[0].lock_script.0.clone(),
+    };
+    let mut prev_outputs = HashMap::new();
+    prev_outputs.insert((prev_txid, prev_vout), prev_output);
+
+    assert!(our_tx.verify_scripts(&prev_outputs).is_ok());
+}
 
         let mut cache = SigHashCache::new();
         let lock_script_bytes = &tx1.outputs[0].lock_script.0;
