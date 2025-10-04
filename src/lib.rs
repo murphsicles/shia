@@ -258,7 +258,7 @@ pub trait BlockHeadersClient {
 }
 
 // BEEF structure
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Beef {
     pub is_atomic: bool,
     pub subject_txid: Option<[u8; 32]>,
@@ -500,9 +500,10 @@ impl Beef {
 mod tests {
     use super::*;
     use hex;
+    use secp256k1::{Secp256k1, SecretKey, PublicKey};
     use sv::messages::{OutPoint, Tx as SvTx, TxIn as SvTxIn, TxOut as SvTxOut};
     use sv::script::Script as SvScript;
-    use sv::util::Hash256 as SvHash256;
+    use sv::util::{Hash256 as SvHash256, hash160};
 
     struct MockHeadersClient;
 
@@ -542,11 +543,11 @@ mod tests {
         // Simple P2PKH from rust-sv tests
         // Private key [1;32], pubkey, pkh
         let private_key = [1u8; 32];
-        let secp = sv::util::ECDSA::new();
-        let secret_key = sv::util::SecretKey::from_slice(&private_key).unwrap();
-        let public_key = sv::util::PublicKey::from_secret_key(&secp, &secret_key);
+        let secp = Secp256k1::new();
+        let secret_key = SecretKey::from_slice(&private_key).unwrap();
+        let public_key = PublicKey::from_secret_key(&secp, &secret_key);
         let pk_bytes = public_key.serialize();
-        let pkh = sv::util::hash160(&pk_bytes);
+        let pkh = hash160(&pk_bytes);
 
         let mut lock_script = SvScript::new();
         lock_script.append(sv::script::op_codes::OP_DUP);
