@@ -7,6 +7,7 @@ use thiserror::Error;
 use sv::messages::Tx as SvTx;
 use sv::script::{op_codes::OP_CODESEPARATOR, Script as SvScript, TransactionChecker, NO_FLAGS};
 use sv::transaction::sighash::SigHashCache;
+use sv::util::Serializable;
 
 #[derive(Error, Debug)]
 pub enum ShiaError {
@@ -134,7 +135,7 @@ impl Transaction {
     }
 
     fn verify_scripts(&self, prev_outputs: &HashMap<([u8; 32], u32), Output>) -> Result<()> {
-        let sv_tx = SvTx::read(&mut Cursor::new(&self.raw))?;
+        let sv_tx = SvTx::read(&mut Cursor::new(&self.raw)).map_err(|e| ShiaError::ScriptEval(e.to_string()))?;
         for (idx, input) in self.inputs.iter().enumerate() {
             let key = (input.prev_txid, input.vout);
             let prev_out = prev_outputs
@@ -303,7 +304,7 @@ impl Beef {
             let start_pos = cursor.position() as usize;
             let remaining = &bytes[start_pos..];
             let tx = Transaction::from_raw(remaining)?;
-            let tx_len = cursor.position() as usize - start_pos;
+            let _tx_len = cursor.position() as usize - start_pos;
             let has_bump = cursor.read_u8()?;
             let bump_index = if has_bump == 0x01 {
                 Some(read_varint(&mut cursor)? as usize)
