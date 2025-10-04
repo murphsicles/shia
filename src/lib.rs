@@ -183,7 +183,7 @@ impl Transaction {
     }
 }
 
-// BUMP structure (unchanged)
+// BUMP structure
 #[derive(Debug, Clone)]
 pub struct Bump {
     pub block_height: u64,
@@ -298,8 +298,7 @@ impl Beef {
         let mut is_atomic = false;
         let mut subject_txid = None;
         let mut prefix = [0u8; 4];
-        cursor.read_exact(&mut prefix)?;
-        if prefix == [0x01, 0x01, 0x01, 0x01] {
+        if cursor.read_exact(&mut prefix).is_ok() && prefix == [0x01, 0x01, 0x01, 0x01] {
             is_atomic = true;
             let mut txid = [0u8; 32];
             cursor.read_exact(&mut txid)?;
@@ -308,24 +307,29 @@ impl Beef {
             cursor.set_position(0);
         }
 
+        eprintln!("Cursor position before version: {}", cursor.position());
         let version = cursor.read_u32::<LittleEndian>()?;
+        eprintln!("Read version: {}", version);
         if version != 4022206465 {
             return Err(ShiaError::InvalidVersion.into());
         }
 
         let n_bumps = read_varint(&mut cursor)? as usize;
+        eprintln!("Cursor position after bumps count: {}", cursor.position());
         let mut bumps = Vec::with_capacity(n_bumps);
         for _ in 0..n_bumps {
             bumps.push(Bump::deserialize(&mut cursor)?);
         }
 
         let n_txs = read_varint(&mut cursor)? as usize;
+        eprintln!("Cursor position after txs count: {}", cursor.position());
         let mut txs = Vec::with_capacity(n_txs);
         for _ in 0..n_txs {
             let start_pos = cursor.position() as usize;
             let remaining = &bytes[start_pos..];
             let tx = Transaction::from_raw(remaining)?;
             let _tx_len = cursor.position() as usize - start_pos;
+            eprintln!("Cursor position after tx: {}", cursor.position());
             let has_bump = cursor.read_u8()?;
             let bump_index = if has_bump == 0x01 {
                 Some(read_varint(&mut cursor)? as usize)
@@ -535,36 +539,34 @@ mod tests {
     }
 
     #[test]
-    #[test]
-fn transaction_from_raw() {
-    // Genesis coinbase tx hex
-    let hex_str = "01000000010000000000000000000000000000000000000000000000000000000000000000ffffffff4d04ffff001d0104455468652054696d65732030332f4a616e2f32303039204368616e63656c6c6f72206f6e206272696e6b206f66207365636f6e64206261696c6f757420666f722062616e6b73ffffffff0100f2052a01000000434104678afdb0fe5548271967f1a67130b7105cd6a828e03909a67962e0ea1f61deb649f6bc3f4cef38c4f35504e51ec112de5c384df7ba0b8d578a4c702b6bf11d5fac00000000";
-    let bytes = hex::decode(hex_str).unwrap();
-    let tx = Transaction::from_raw(&bytes).unwrap();
+    fn transaction_from_raw() {
+        // Genesis coinbase tx hex
+        let hex_str = "01000000010000000000000000000000000000000000000000000000000000000000000000ffffffff4d04ffff001d0104455468652054696d65732030332f4a616e2f32303039204368616e63656c6c6f72206f6e206272696e6b206f66207365636f6e64206261696c6f757420666f722062616e6b73ffffffff0100f2052a01000000434104678afdb0fe5548271967f1a67130b7105cd6a828e03909a67962e0ea1f61deb649f6bc3f4cef38c4f35504e51ec112de5c384df7ba0b8d578a4c702b6bf11d5fac00000000";
+        let bytes = hex::decode(hex_str).unwrap();
+        let tx = Transaction::from_raw(&bytes).unwrap();
 
-    assert_eq!(tx.version, 1);
-    assert_eq!(tx.inputs.len(), 1);
-    assert_eq!(tx.inputs[0].prev_txid, [0u8; 32]);
-    assert_eq!(tx.inputs[0].vout, 0xffffffff);
-    assert_eq!(tx.inputs[0].script_sig.len(), 77); // 4d = 77
-    assert_eq!(tx.inputs[0].sequence, 0xffffffff);
-    assert_eq!(tx.outputs.len(), 1);
-    assert_eq!(tx.outputs[0].value, 705032704u64); // Fixed: 00f2052a LE = 705,032,704
-    assert_eq!(tx.outputs[0].script_pubkey.len(), 67); // 43 = 67 (P2PK)
-    assert_eq!(tx.locktime, 0);
+        assert_eq!(tx.version, 1);
+        assert_eq!(tx.inputs.len(), 1);
+        assert_eq!(tx.inputs[0].prev_txid, [0u8; 32]);
+        assert_eq!(tx.inputs[0].vout, 0xffffffff);
+        assert_eq!(tx.inputs[0].script_sig.len(), 77); // 4d = 77
+        assert_eq!(tx.inputs[0].sequence, 0xffffffff);
+        assert_eq!(tx.outputs.len(), 1);
+        assert_eq!(tx.outputs[0].value, 705032704u64); // Fixed: 00f2052a LE = 705,032,704
+        assert_eq!(tx.outputs[0].script_pubkey.len(), 67); // 43 = 67 (P2PK)
+        assert_eq!(tx.locktime, 0);
 
-    // Check txid
-    let expected_txid_hex = "3ba3edfd7a7b12b27ac72c3e67768f617fc81bc3888a51323a9fb8aa4b1e5e4a";
-    let expected_txid = hex::decode(expected_txid_hex).unwrap();
-    let mut expected_arr = [0u8; 32];
-    expected_arr.copy_from_slice(&expected_txid);
-    assert_eq!(tx.txid(), expected_arr);
-}
+        // Check txid
+        let expected_txid_hex = "3ba3edfd7a7b12b27ac72c3e67768f617fc81bc3888a51323a9fb8aa4b1e5e4a";
+        let expected_txid = hex::decode(expected_txid_hex).unwrap();
+        let mut expected_arr = [0u8; 32];
+        expected_arr.copy_from_slice(&expected_txid);
+        assert_eq!(tx.txid(), expected_arr);
+    }
 
     #[test]
     fn transaction_verify_scripts() {
         // Simple P2PKH from rust-sv tests
-        // Private key [1;32], pubkey, pkh
         let private_key = [1u8; 32];
         let secp = Secp256k1::new();
         let secret_key = SecretKey::from_slice(&private_key).unwrap();
@@ -614,14 +616,10 @@ fn transaction_from_raw() {
         unlock_script.append_data(&pk_bytes);
         tx2.inputs[0].unlock_script = unlock_script;
 
-        // Serialize tx2 to hex
         let mut tx2_bytes = Vec::new();
         tx2.write(&mut tx2_bytes).unwrap();
 
-        // Now parse with our Transaction
         let our_tx = Transaction::from_raw(&tx2_bytes).unwrap();
-
-        // Prev output for verify_scripts
         let prev_txid = our_tx.inputs[0].prev_txid;
         let prev_vout = our_tx.inputs[0].vout;
         let prev_output = Output {
@@ -631,16 +629,11 @@ fn transaction_from_raw() {
         let mut prev_outputs = HashMap::new();
         prev_outputs.insert((prev_txid, prev_vout), prev_output);
 
-        // Verify
         assert!(our_tx.verify_scripts(&prev_outputs).is_ok());
     }
 
     #[test]
     fn bump_compute_merkle_root() {
-        // Simple BUMP for a block with 2 txs
-        // Assume block height 1, tree height 1 (levels 0 and 1)
-        // Level 0: leaf 0 flag 2 hash tx1, leaf 1 flag 0 hash tx2
-        // Level 1: root
         let tx1_hash = [1u8; 32];
         let tx2_hash = [2u8; 32];
         let concat = [&tx1_hash[..], &tx2_hash[..]].concat();
@@ -649,7 +642,6 @@ fn transaction_from_raw() {
         let mut bump_bytes = Vec::new();
         write_varint(&mut bump_bytes, 1).unwrap(); // height
         bump_bytes.write_u8(1).unwrap(); // tree height
-        // Level 0
         write_varint(&mut bump_bytes, 2).unwrap(); // 2 leaves
         write_varint(&mut bump_bytes, 0).unwrap(); // offset 0
         bump_bytes.write_u8(2).unwrap(); // flag 2
@@ -657,9 +649,6 @@ fn transaction_from_raw() {
         write_varint(&mut bump_bytes, 1).unwrap(); // offset 1
         bump_bytes.write_u8(0).unwrap(); // flag 0
         bump_bytes.write_all(&tx2_hash).unwrap();
-        // Level 1 empty? Wait, for height 1, level 1 would be the root calc.
-
-        // But according to compute, it's calculated from leaves up.
 
         let mut cursor = Cursor::new(bump_bytes);
         let bump = Bump::deserialize(&mut cursor).unwrap();
@@ -670,27 +659,27 @@ fn transaction_from_raw() {
 
     #[test]
     fn beef_from_hex_serialize() {
-    // Valid minimal non-atomic BEEF: version + 0 bumps + 1 tx (minimal coinbase) + 0x00
-    let minimal_beef_hex = "f1c6c3ef00010100000000000000000000000000000000000000000000000000000000000000000000000000000000000504ffff001d0104ffffffff0100ca9a3b000000001976a914000000000000000000000000000000000000000088ac0000000000";
-    let beef = Beef::from_hex(minimal_beef_hex).unwrap();
-    let serialized = beef.serialize().unwrap();
-    let serialized_hex = hex::encode(serialized);
-    assert_eq!(serialized_hex.to_lowercase(), minimal_beef_hex.to_lowercase());
-}
+        // Valid minimal non-atomic BEEF: version + 0 bumps + 1 tx (minimal coinbase) + 0x00
+        let minimal_beef_hex = "f1c6c3ef00010100000000000000000000000000000000000000000000000000000000000000000000000000000000000504ffff001dffffffff0100ca9a3b000000001976a914000000000000000000000000000000000000000088ac0000000000";
+        let beef = Beef::from_hex(minimal_beef_hex).expect("Failed to deserialize BEEF");
+        let serialized = beef.serialize().expect("Failed to serialize BEEF");
+        let serialized_hex = hex::encode(serialized);
+        assert_eq!(serialized_hex.to_lowercase(), minimal_beef_hex.to_lowercase());
+    }
 
     #[test]
     fn beef_verify() {
-    // Same minimal BEEF as above
-    let minimal_beef_hex = "f1c6c3ef00010100000000000000000000000000000000000000000000000000000000000000000000000000000000000504ffff001d0104ffffffff0100ca9a3b000000001976a914000000000000000000000000000000000000000088ac0000000000";
-    let beef = Beef::from_hex(minimal_beef_hex).unwrap();
-    let mock_client = MockHeadersClient;
-    assert!(beef.verify(&mock_client).is_ok());
-}
+        // Same minimal BEEF as above
+        let minimal_beef_hex = "f1c6c3ef00010100000000000000000000000000000000000000000000000000000000000000000000000000000000000504ffff001dffffffff0100ca9a3b000000001976a914000000000000000000000000000000000000000088ac0000000000";
+        let beef = Beef::from_hex(minimal_beef_hex).expect("Failed to deserialize BEEF");
+        let mock_client = MockHeadersClient;
+        assert!(beef.verify(&mock_client).is_ok());
+    }
 
     #[test]
     fn beef_build_simple() {
-        // Valid minimal coinbase-like tx: 1 input (null), 1 output (10 satoshis, P2PKH script)
-        let subject_raw = hex::decode("01000000010000000000000000000000000000000000000000000000000000000000000000ffffffff0100ffffffff0100ca9a3b000000001976a914000000000000000000000000000000000000000088ac00000000").unwrap();
+        // Valid minimal coinbase-like tx
+        let subject_raw = hex::decode("01000000010000000000000000000000000000000000000000000000000000000000000000ffffffff0504ffff001dffffffff0100ca9a3b000000001976a914000000000000000000000000000000000000000088ac00000000").unwrap();
         let subject_tx = Transaction::from_raw(&subject_raw).unwrap();
         let ancestors = HashMap::new();
         let bump_map = HashMap::new();
@@ -704,7 +693,6 @@ fn transaction_from_raw() {
         assert_eq!(beef.bumps.len(), 0);
         assert!(beef.txs[0].1.is_none());
 
-        // Serialize and deserialize
         let serialized = beef.serialize().unwrap();
         let deserialized = Beef::deserialize(&serialized).unwrap();
         assert_eq!(deserialized.txs[0].0.version, subject_tx.version);
@@ -715,17 +703,17 @@ fn transaction_from_raw() {
 
     #[test]
     fn beef_validate_atomic() {
-    // Valid minimal atomic BEEF: prefix + subject txid + version + 0 bumps + 1 tx + 0x00
-    let tx_raw = "01000000010000000000000000000000000000000000000000000000000000000000000000ffffffff0504ffff001d0104ffffffff0100ca9a3b000000001976a914000000000000000000000000000000000000000088ac00000000";
-    let tx = Transaction::from_raw(&hex::decode(tx_raw).unwrap()).unwrap();
-    let subject_txid = tx.txid();
-    let atomic_beef_hex = format!("01010101{}f1c6c3ef0001{}", hex::encode(subject_txid), tx_raw);
-    let beef = Beef::from_hex(&atomic_beef_hex).unwrap();
-    assert!(beef.validate_atomic().is_ok());
+        // Valid minimal atomic BEEF: prefix + subject txid + version + 0 bumps + 1 tx + 0x00
+        let tx_raw = "01000000010000000000000000000000000000000000000000000000000000000000000000ffffffff0504ffff001dffffffff0100ca9a3b000000001976a914000000000000000000000000000000000000000088ac00000000";
+        let tx = Transaction::from_raw(&hex::decode(tx_raw).unwrap()).expect("Failed to parse tx");
+        let subject_txid = tx.txid();
+        let atomic_beef_hex = format!("01010101{}f1c6c3ef0001{}", hex::encode(subject_txid), tx_raw);
+        let beef = Beef::from_hex(&atomic_beef_hex).expect("Failed to deserialize atomic BEEF");
+        assert!(beef.validate_atomic().is_ok());
 
-    // Invalid: tamper with subject_txid
-    let mut invalid_beef = beef.clone();
-    invalid_beef.subject_txid = Some([0u8; 32]);
-    assert!(invalid_beef.validate_atomic().is_err());
+        // Invalid: tamper with subject_txid
+        let mut invalid_beef = beef.clone();
+        invalid_beef.subject_txid = Some([0u8; 32]);
+        assert!(invalid_beef.validate_atomic().is_err());
     }
 }
