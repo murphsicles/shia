@@ -369,7 +369,7 @@ impl Beef {
             in_degree.entry(*txid).or_insert(0);
             for input in &tx.inputs {
                 if all_txs.contains_key(&input.prev_txid) {
-                    graph.entry(input.prev_txid).or_insert(HashSet::new()).insert(*txid);
+                    graph.entry(input.prev_txid).or_default().insert(*txid);
                     *in_degree.entry(*txid).or_insert(0) += 1;
                 }
             }
