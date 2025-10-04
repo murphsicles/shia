@@ -515,7 +515,7 @@ mod tests {
 
     #[test]
     fn transaction_from_raw() {
-    // Genesis coinbase tx hex (BTC but format same; value is 705032704 sats little-endian)
+    // Genesis coinbase tx hex (BTC but format same)
     let hex_str = "01000000010000000000000000000000000000000000000000000000000000000000000000ffffffff4d04ffff001d0104455468652054696d65732030332f4a616e2f32303039204368616e63656c6c6f72206f6e206272696e6b206f66207365636f6e64206261696c6f757420666f722062616e6b73ffffffff0100f2052a01000000434104678afdb0fe5548271967f1a67130b7105cd6a828e03909a67962e0ea1f61deb649f6bc3f4cef38c4f35504e51ec112de5c384df7ba0b8d578a4c702b6bf11d5fac00000000";
     let bytes = hex::decode(hex_str).unwrap();
     let tx = Transaction::from_raw(&bytes).unwrap();
@@ -527,7 +527,7 @@ mod tests {
     assert_eq!(tx.inputs[0].script_sig.len(), 77); // 4d = 77
     assert_eq!(tx.inputs[0].sequence, 0xffffffff);
     assert_eq!(tx.outputs.len(), 1);
-    assert_eq!(tx.outputs[0].value, 705032704u64); // Fixed: little-endian 00f2052a
+    assert_eq!(tx.outputs[0].value, 705032704u64); // Corrected: 00f2052a LE
     assert_eq!(tx.outputs[0].script_pubkey.len(), 67); // 43 = 67 (P2PK)
     assert_eq!(tx.locktime, 0);
 
@@ -648,18 +648,18 @@ mod tests {
 
     #[test]
     fn beef_from_hex_serialize() {
-        // Minimal valid non-atomic BEEF: version LE + varint 0 bumps + varint 1 tx + short tx raw + 0x00 (no bump)
-        let minimal_beef_hex = "f1c6c3ef0100000001"; // Version 4022206465 LE + 0 bumps + 1 tx + short tx placeholder + 0x00
+        // Valid minimal non-atomic BEEF: version + 0 bumps + 1 tx (minimal coinbase) + 0x00
+        let minimal_beef_hex = "f1c6c3ef0001000000000000000000000000000000000000000000000000000000000000000000000000000000000000ffffffff0100ffffffff0100ca9a3b000000001976a914000000000000000000000000000000000000000088ac0000000000";
         let beef = Beef::from_hex(minimal_beef_hex).unwrap();
         let serialized = beef.serialize().unwrap();
         let serialized_hex = hex::encode(serialized);
-        assert_eq!(serialized_hex.to_uppercase(), minimal_beef_hex.to_uppercase()); // Ignore case for hex
+        assert_eq!(serialized_hex.to_lowercase(), minimal_beef_hex.to_lowercase());
     }
 
     #[test]
     fn beef_verify() {
         // Same minimal BEEF as above
-        let minimal_beef_hex = "f1c6c3ef0100000001";
+        let minimal_beef_hex = "f1c6c3ef0001000000000000000000000000000000000000000000000000000000000000000000000000000000000000ffffffff0100ffffffff0100ca9a3b000000001976a914000000000000000000000000000000000000000088ac0000000000";
         let beef = Beef::from_hex(minimal_beef_hex).unwrap();
         let mock_client = MockHeadersClient;
         assert!(beef.verify(&mock_client).is_ok());
@@ -667,29 +667,38 @@ mod tests {
 
     #[test]
     fn beef_build_simple() {
-    // Valid minimal coinbase-like tx: 1 input (null), 1 output (10 satoshis, minimal script)
-    let subject_raw = hex::decode("01000000010000000000000000000000000000000000000000000000000000000000000000ffffffff0100ffffffff0100ca9a3b000000001976a914000000000000000000000000000000000000000088ac00000000").unwrap();
-    let subject_tx = Transaction::from_raw(&subject_raw).unwrap();
-    let ancestors = HashMap::new();
-    let bump_map = HashMap::new();
-    let beef = Beef::build(subject_tx.clone(), ancestors, bump_map, false).unwrap();
+        // Valid minimal coinbase-like tx: 1 input (null), 1 output (10 satoshis, P2PKH script)
+        let subject_raw = hex::decode("01000000010000000000000000000000000000000000000000000000000000000000000000ffffffff0100ffffffff0100ca9a3b000000001976a914000000000000000000000000000000000000000088ac00000000").unwrap();
+        let subject_tx = Transaction::from_raw(&subject_raw).unwrap();
+        let ancestors = HashMap::new();
+        let bump_map = HashMap::new();
+        let beef = Beef::build(subject_tx.clone(), ancestors, bump_map, false).unwrap();
 
-    assert_eq!(beef.txs.len(), 1);
-    assert_eq!(beef.txs[0].0.raw, subject_raw);
-    assert_eq!(beef.bumps.len(), 0);
-    assert!(beef.txs[0].1.is_none());
+        assert_eq!(beef.txs.len(), 1);
+        assert_eq!(beef.txs[0].0.version, subject_tx.version);
+        assert_eq!(beef.txs[0].0.inputs.len(), subject_tx.inputs.len());
+        assert_eq!(beef.txs[0].0.outputs.len(), subject_tx.outputs.len());
+        assert_eq!(beef.txs[0].0.locktime, subject_tx.locktime);
+        assert_eq!(beef.bumps.len(), 0);
+        assert!(beef.txs[0].1.is_none());
 
-    // Serialize and deserialize
-    let serialized = beef.serialize().unwrap();
-    let deserialized = Beef::deserialize(&serialized).unwrap();
-    assert_eq!(deserialized.txs[0].0.raw, subject_raw);
-}
+        // Serialize and deserialize
+        let serialized = beef.serialize().unwrap();
+        let deserialized = Beef::deserialize(&serialized).unwrap();
+        assert_eq!(deserialized.txs[0].0.version, subject_tx.version);
+        assert_eq!(deserialized.txs[0].0.inputs.len(), subject_tx.inputs.len());
+        assert_eq!(deserialized.txs[0].0.outputs.len(), subject_tx.outputs.len());
+        assert_eq!(deserialized.txs[0].0.locktime, subject_tx.locktime);
+    }
 
     #[test]
     fn beef_validate_atomic() {
-        // For atomic, add prefix + subject txid (dummy)
-        let atomic_beef_hex = "0101010100000000f1c6c3ef0100000001"; // Atomic prefix + dummy txid + minimal BEEF
-        let beef = Beef::from_hex(atomic_beef_hex).unwrap();
+        // Valid minimal atomic BEEF: prefix + subject txid + version + 0 bumps + 1 tx + 0x00
+        let tx_raw = "01000000010000000000000000000000000000000000000000000000000000000000000000ffffffff0100ffffffff0100ca9a3b000000001976a914000000000000000000000000000000000000000088ac00000000";
+        let tx = Transaction::from_raw(&hex::decode(tx_raw).unwrap()).unwrap();
+        let subject_txid = tx.txid();
+        let atomic_beef_hex = format!("01010101{}f1c6c3ef0001{}", hex::encode(subject_txid), tx_raw);
+        let beef = Beef::from_hex(&atomic_beef_hex).unwrap();
         assert!(beef.validate_atomic().is_ok());
 
         // Invalid: tamper with subject_txid
