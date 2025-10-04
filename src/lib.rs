@@ -498,5 +498,198 @@ impl Beef {
 #[cfg(test)]
 mod tests {
     use super::*;
-    // TODO: Add test cases using examples from BRC-62 spec
+    use hex;
+    use sv::messages::{OutPoint, Tx as SvTx, TxIn as SvTxIn, TxOut as SvTxOut};
+    use sv::script::Script as SvScript;
+    use sv::util::Hash256 as SvHash256;
+
+    struct MockHeadersClient;
+
+    impl BlockHeadersClient for MockHeadersClient {
+        fn is_valid_root_for_height(&self, _root: [u8; 32], _height: u64) -> bool {
+            true
+        }
+    }
+
+    #[test]
+    fn transaction_from_raw() {
+        // Genesis coinbase tx hex (BTC but format same)
+        let hex_str = "01000000010000000000000000000000000000000000000000000000000000000000000000ffffffff4d04ffff001d0104455468652054696d65732030332f4a616e2f32303039204368616e63656c6c6f72206f6e206272696e6b206f66207365636f6e64206261696c6f757420666f722062616e6b73ffffffff0100f2052a01000000434104678afdb0fe5548271967f1a67130b7105cd6a828e03909a67962e0ea1f61deb649f6bc3f4cef38c4f35504e51ec112de5c384df7ba0b8d578a4c702b6bf11d5fac00000000";
+        let bytes = hex::decode(hex_str).unwrap();
+        let tx = Transaction::from_raw(&bytes).unwrap();
+
+        assert_eq!(tx.version, 1);
+        assert_eq!(tx.inputs.len(), 1);
+        assert_eq!(tx.inputs[0].prev_txid, [0u8; 32]);
+        assert_eq!(tx.inputs[0].vout, 0xffffffff);
+        assert_eq!(tx.inputs[0].script_sig.len(), 77); // 4d = 77
+        assert_eq!(tx.inputs[0].sequence, 0xffffffff);
+        assert_eq!(tx.outputs.len(), 1);
+        assert_eq!(tx.outputs[0].value, 0x2a05f200); // 50 BSV
+        assert_eq!(tx.outputs[0].script_pubkey.len(), 65); // 41 = 65
+        assert_eq!(tx.locktime, 0);
+
+        // Check txid
+        let expected_txid = hex::decode("3ba3edfd7a7b12b27ac72c3e67768f617fc81bc3888a51323a9fb8aa4b1e5e4a").unwrap();
+        let mut expected_arr = [0u8; 32];
+        expected_arr.copy_from_slice(&expected_txid);
+        assert_eq!(tx.txid(), expected_arr);
+    }
+
+    #[test]
+    fn transaction_verify_scripts() {
+        // Simple P2PKH from rust-sv tests
+        // Private key [1;32], pubkey, pkh
+        let private_key = [1u8; 32];
+        let secp = sv::util::ECDSA::new();
+        let secret_key = sv::util::SecretKey::from_slice(&private_key).unwrap();
+        let public_key = sv::util::PublicKey::from_secret_key(&secp, &secret_key);
+        let pk_bytes = public_key.serialize();
+        let pkh = sv::util::hash160(&pk_bytes);
+
+        let mut lock_script = SvScript::new();
+        lock_script.append(sv::script::op_codes::OP_DUP);
+        lock_script.append(sv::script::op_codes::OP_HASH160);
+        lock_script.append_data(&pkh.0);
+        lock_script.append(sv::script::op_codes::OP_EQUALVERIFY);
+        lock_script.append(sv::script::op_codes::OP_CHECKSIG);
+
+        let tx1 = SvTx {
+            version: 1,
+            inputs: vec![],
+            outputs: vec![SvTxOut {
+                satoshis: 10,
+                lock_script,
+            }],
+            lock_time: 0,
+        };
+
+        let mut tx2 = SvTx {
+            version: 1,
+            inputs: vec![SvTxIn {
+                prev_output: OutPoint {
+                    hash: SvHash256(tx1.hash().0),
+                    index: 0,
+                },
+                unlock_script: SvScript(vec![]),
+                sequence: 0xffffffff,
+            }],
+            outputs: vec![],
+            lock_time: 0,
+        };
+
+        let mut cache = SigHashCache::new();
+        let lock_script_bytes = &tx1.outputs[0].lock_script.0;
+        let sighash_type = sv::transaction::sighash::SIGHASH_ALL | sv::transaction::sighash::SIGHASH_FORKID;
+        let sig_hash = sv::transaction::sighash::sighash(&tx2, 0, lock_script_bytes, 10, sighash_type, &mut cache).unwrap();
+        let signature = sv::transaction::generate_signature(&private_key, &sig_hash, sighash_type).unwrap();
+
+        let mut unlock_script = SvScript::new();
+        unlock_script.append_data(&signature);
+        unlock_script.append_data(&pk_bytes);
+        tx2.inputs[0].unlock_script = unlock_script;
+
+        // Serialize tx2 to hex
+        let mut tx2_bytes = Vec::new();
+        tx2.write(&mut tx2_bytes).unwrap();
+
+        // Now parse with our Transaction
+        let our_tx = Transaction::from_raw(&tx2_bytes).unwrap();
+
+        // Prev output for verify_scripts
+        let prev_txid = our_tx.inputs[0].prev_txid;
+        let prev_vout = our_tx.inputs[0].vout;
+        let prev_output = Output {
+            value: 10,
+            script_pubkey: tx1.outputs[0].lock_script.0.clone(),
+        };
+        let mut prev_outputs = HashMap::new();
+        prev_outputs.insert((prev_txid, prev_vout), prev_output);
+
+        // Verify
+        assert!(our_tx.verify_scripts(&prev_outputs).is_ok());
+    }
+
+    #[test]
+    fn bump_compute_merkle_root() {
+        // Simple BUMP for a block with 2 txs
+        // Assume block height 1, tree height 1 (levels 0 and 1)
+        // Level 0: leaf 0 flag 2 hash tx1, leaf 1 flag 0 hash tx2
+        // Level 1: root
+        let tx1_hash = [1u8; 32];
+        let tx2_hash = [2u8; 32];
+        let concat = [&tx1_hash[..], &tx2_hash[..]].concat();
+        let root = double_sha256(&concat);
+
+        let mut bump_bytes = Vec::new();
+        write_varint(&mut bump_bytes, 1).unwrap(); // height
+        bump_bytes.write_u8(1).unwrap(); // tree height
+        // Level 0
+        write_varint(&mut bump_bytes, 2).unwrap(); // 2 leaves
+        write_varint(&mut bump_bytes, 0).unwrap(); // offset 0
+        bump_bytes.write_u8(2).unwrap(); // flag 2
+        bump_bytes.write_all(&tx1_hash).unwrap();
+        write_varint(&mut bump_bytes, 1).unwrap(); // offset 1
+        bump_bytes.write_u8(0).unwrap(); // flag 0
+        bump_bytes.write_all(&tx2_hash).unwrap();
+        // Level 1 empty? Wait, for height 1, level 1 would be the root calc.
+
+        // But according to compute, it's calculated from leaves up.
+
+        let mut cursor = Cursor::new(bump_bytes);
+        let bump = Bump::deserialize(&mut cursor).unwrap();
+
+        let computed_root = bump.compute_merkle_root_for_hash(tx1_hash).unwrap();
+        assert_eq!(computed_root, root);
+    }
+
+    #[test]
+    fn beef_from_hex_serialize() {
+        let beef_hex = "0100beef01fe636d0c0007021400fe507c0c7aa754cef1f7889d5fd395cf1f785dd7de98eed895dbedfe4e5bc70d1502ac4e164f5bc16746bb0868404292ac8318bbac3800e4aad13a014da427adce3e010b00bc4ff395efd11719b277694cface5aa50d085a0bb81f613f70313acd28cf4557010400574b2d9142b8d28b61d88e3b2c3f44d858411356b49a28a4643b6d1a6a092a5201030051a05fc84d531b5d250c23f4f886f6812f9fe3f402d61607f977b4ecd2701c19010000fd781529d58fc2523cf396a7f25440b409857e7e221766c57214b1d38c7b481f01010062f542f45ea3660f86c013ced80534cb5fd4c19d66c56e7e8c5d4bf2d40acc5e010100b121e91836fd7cd5102b654e9f72f3cf6fdbfd0b161c53a9c54b12c841126331020100000001cd4e4cac3c7b56920d1e7655e7e260d31f29d9a388d04910f1bbd72304a79029010000006b483045022100e75279a205a547c445719420aa3138bf14743e3f42618e5f86a19bde14bb95f7022064777d34776b05d816daf1699493fcdf2ef5a5ab1ad710d9c97bfb5b8f7cef3641210263e2dee22b1ddc5e11f6fab8bcd2378bdd19580d640501ea956ec0e786f93e76ffffffff013e660000000000001976a9146bfd5c7fbe21529d45803dbcf0c87dd3c71efbc288ac0000000001000100000001ac4e164f5bc16746bb0868404292ac8318bbac3800e4aad13a014da427adce3e000000006a47304402203a61a2e931612b4bda08d541cfb980885173b8dcf64a3471238ae7abcd368d6402204cbf24f04b9aa2256d8901f0ed97866603d2be8324c2bfb7a37bf8fc90edd5b441210263e2dee22b1ddc5e11f6fab8bcd2378bdd19580d640501ea956ec0e786f93e76ffffffff013c660000000000001976a9146bfd5c7fbe21529d45803dbcf0c87dd3c71efbc288ac0000000000";
+        let beef = Beef::from_hex(beef_hex).unwrap();
+        let serialized = beef.serialize().unwrap();
+        let serialized_hex = hex::encode(serialized);
+        assert_eq!(serialized_hex, beef_hex.to_lowercase());
+    }
+
+    #[test]
+    fn beef_verify() {
+        let beef_hex = "0100beef01fe636d0c0007021400fe507c0c7aa754cef1f7889d5fd395cf1f785dd7de98eed895dbedfe4e5bc70d1502ac4e164f5bc16746bb0868404292ac8318bbac3800e4aad13a014da427adce3e010b00bc4ff395efd11719b277694cface5aa50d085a0bb81f613f70313acd28cf4557010400574b2d9142b8d28b61d88e3b2c3f44d858411356b49a28a4643b6d1a6a092a5201030051a05fc84d531b5d250c23f4f886f6812f9fe3f402d61607f977b4ecd2701c19010000fd781529d58fc2523cf396a7f25440b409857e7e221766c57214b1d38c7b481f01010062f542f45ea3660f86c013ced80534cb5fd4c19d66c56e7e8c5d4bf2d40acc5e010100b121e91836fd7cd5102b654e9f72f3cf6fdbfd0b161c53a9c54b12c841126331020100000001cd4e4cac3c7b56920d1e7655e7e260d31f29d9a388d04910f1bbd72304a79029010000006b483045022100e75279a205a547c445719420aa3138bf14743e3f42618e5f86a19bde14bb95f7022064777d34776b05d816daf1699493fcdf2ef5a5ab1ad710d9c97bfb5b8f7cef3641210263e2dee22b1ddc5e11f6fab8bcd2378bdd19580d640501ea956ec0e786f93e76ffffffff013e660000000000001976a9146bfd5c7fbe21529d45803dbcf0c87dd3c71efbc288ac0000000001000100000001ac4e164f5bc16746bb0868404292ac8318bbac3800e4aad13a014da427adce3e000000006a47304402203a61a2e931612b4bda08d541cfb980885173b8dcf64a3471238ae7abcd368d6402204cbf24f04b9aa2256d8901f0ed97866603d2be8324c2bfb7a37bf8fc90edd5b441210263e2dee22b1ddc5e11f6fab8bcd2378bdd19580d640501ea956ec0e786f93e76ffffffff013c660000000000001976a9146bfd5c7fbe21529d45803dbcf0c87dd3c71efbc288ac0000000000";
+        let beef = Beef::from_hex(beef_hex).unwrap();
+        let mock_client = MockHeadersClient;
+        assert!(beef.verify(&mock_client).is_ok());
+    }
+
+    #[test]
+    fn beef_build_simple() {
+        // Simple subject tx with no ancestors, no bump
+        let subject_raw = hex::decode("01000000010000000000000000000000000000000000000000000000000000000000000000ffffffff0704ffff001d0104ffffffff0100f2052a0100000043410496b538e853519c726a2c91e61ec11600ae1390813a627c66fb8be7947be63c52da7589379515d4e0a604f8141781e62294721166bf621e73a82cbf2342c858eeac00000000").unwrap();
+        let subject_tx = Transaction::from_raw(&subject_raw).unwrap();
+        let ancestors = HashMap::new();
+        let bump_map = HashMap::new();
+        let beef = Beef::build(subject_tx.clone(), ancestors, bump_map, false).unwrap();
+
+        assert_eq!(beef.txs.len(), 1);
+        assert_eq!(beef.txs[0].0.raw, subject_raw);
+        assert_eq!(beef.bumps.len(), 0);
+        assert!(beef.txs[0].1.is_none());
+
+        // Serialize and deserialize
+        let serialized = beef.serialize().unwrap();
+        let deserialized = Beef::deserialize(&serialized).unwrap();
+        assert_eq!(deserialized.txs[0].0.raw, subject_raw);
+    }
+
+    #[test]
+    fn beef_validate_atomic() {
+        // Use the sample, which is atomic
+        let beef_hex = "0100beef01fe636d0c0007021400fe507c0c7aa754cef1f7889d5fd395cf1f785dd7de98eed895dbedfe4e5bc70d1502ac4e164f5bc16746bb0868404292ac8318bbac3800e4aad13a014da427adce3e010b00bc4ff395efd11719b277694cface5aa50d085a0bb81f613f70313acd28cf4557010400574b2d9142b8d28b61d88e3b2c3f44d858411356b49a28a4643b6d1a6a092a5201030051a05fc84d531b5d250c23f4f886f6812f9fe3f402d61607f977b4ecd2701c19010000fd781529d58fc2523cf396a7f25440b409857e7e221766c57214b1d38c7b481f01010062f542f45ea3660f86c013ced80534cb5fd4c19d66c56e7e8c5d4bf2d40acc5e010100b121e91836fd7cd5102b654e9f72f3cf6fdbfd0b161c53a9c54b12c841126331020100000001cd4e4cac3c7b56920d1e7655e7e260d31f29d9a388d04910f1bbd72304a79029010000006b483045022100e75279a205a547c445719420aa3138bf14743e3f42618e5f86a19bde14bb95f7022064777d34776b05d816daf1699493fcdf2ef5a5ab1ad710d9c97bfb5b8f7cef3641210263e2dee22b1ddc5e11f6fab8bcd2378bdd19580d640501ea956ec0e786f93e76ffffffff013e660000000000001976a9146bfd5c7fbe21529d45803dbcf0c87dd3c71efbc288ac0000000001000100000001ac4e164f5bc16746bb0868404292ac8318bbac3800e4aad13a014da427adce3e000000006a47304402203a61a2e931612b4bda08d541cfb980885173b8dcf64a3471238ae7abcd368d6402204cbf24f04b9aa2256d8901f0ed97866603d2be8324c2bfb7a37bf8fc90edd5b441210263e2dee22b1ddc5e11f6fab8bcd2378bdd19580d640501ea956ec0e786f93e76ffffffff013c660000000000001976a9146bfd5c7fbe21529d45803dbcf0c87dd3c71efbc288ac0000000000";
+        let beef = Beef::from_hex(beef_hex).unwrap();
+        assert!(beef.validate_atomic().is_ok());
+
+        // Invalid: tamper with subject_txid
+        let mut invalid_beef = beef.clone();
+        invalid_beef.subject_txid = Some([0u8; 32]);
+        assert!(invalid_beef.validate_atomic().is_err());
+    }
 }
