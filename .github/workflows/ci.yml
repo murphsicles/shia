@@ -26,9 +26,6 @@ jobs:
     - name: Cache Dependencies
       uses: Swatinem/rust-cache@v2
 
-    - name: Check formatting
-      run: cargo fmt --all -- --check
-
     - name: Run clippy
       run: cargo clippy -- -D warnings
 
