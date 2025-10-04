@@ -2,9 +2,9 @@
 
 # Shia 🚀
 
+![Rust](https://img.shields.io/badge/rust-edition%202024-orange)
 [![Crates.io](https://img.shields.io/crates/v/shia.svg)](https://crates.io/crates/shia)
 [![Dependencies](https://deps.rs/repo/github/murphsicles/shia/status.svg)](https://deps.rs/repo/github/murphsicles/shia)
-[![Rust](https://img.shields.io/badge/rust-1.82.0-blue.svg)](https://www.rust-lang.org/)
 [![CI](https://img.shields.io/github/actions/workflow/status/murphsicles/shia/ci.yml?branch=main)](https://github.com/murphsicles/shia/actions/workflows/ci.yml)
 
 A Rust crate implementing the BSV BEEF (Background Evaluation Extended Format) protocol (BRC-62) for Simplified Payment Verification (SPV) on Bitcoin SV. It supports parsing, serialization, building from transaction DAGs, and verification of transactions with Merkle proofs using BUMP (BRC-74). Designed for integration into BSV wallet stacks, with script evaluation via the `rust-sv` crate.
