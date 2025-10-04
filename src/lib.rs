@@ -1,11 +1,12 @@
 use anyhow::{anyhow, Result};
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
+use sha2::{Digest, Sha256};
 use std::collections::{HashMap, HashSet};
 use std::io::{self, Cursor, Read, Write};
 use thiserror::Error;
 
 #[derive(Error, Debug)]
-pub enum BeefError {
+pub enum ShiaError {
     #[error("IO error: {0}")]
     Io(#[from] io::Error),
     #[error("Invalid VarInt")]
@@ -16,11 +17,25 @@ pub enum BeefError {
     InvalidVersion,
     #[error("Verification failed: {0}")]
     Verification(String),
-    #[error("Atomic BEEF mismatch: unrelated tx")]
+    #[error("Atomic mismatch: unrelated tx")]
     AtomicMismatch,
+    #[error("Missing sibling in BUMP")]
+    MissingSibling,
+    #[error("Leaf not found in BUMP")]
+    LeafNotFound,
 }
 
-// VarInt implementation (Bitcoin-style)
+// Helper for double SHA256
+fn double_sha256(data: &[u8]) -> [u8; 32] {
+    let mut hasher = Sha256::new();
+    hasher.update(data);
+    let hash1 = hasher.finalize();
+    let mut hasher = Sha256::new();
+    hasher.update(hash1);
+    hasher.finalize().into()
+}
+
+// VarInt implementation
 fn read_varint<R: Read>(reader: &mut R) -> Result<u64> {
     let mut b = [0u8; 1];
     reader.read_exact(&mut b)?;
@@ -33,7 +48,7 @@ fn read_varint<R: Read>(reader: &mut R) -> Result<u64> {
     }
 }
 
-fn write_varint<W: Write>(writer: &mut W, mut n: u64) -> Result<()> {
+fn write_varint<W: Write>(writer: &mut W, n: u64) -> Result<()> {
     if n < 0xfd {
         writer.write_u8(n as u8)?;
     } else if n <= 0xffff {
@@ -49,14 +64,14 @@ fn write_varint<W: Write>(writer: &mut W, mut n: u64) -> Result<()> {
     Ok(())
 }
 
-// Simplified Transaction struct (extend for full script/sig verification in your wallet)
+// Simplified Transaction (extend for full features; consider using bitcoinsv crate for production)
 #[derive(Clone, Debug)]
 pub struct Transaction {
     pub version: u32,
     pub inputs: Vec<Input>,
     pub outputs: Vec<Output>,
     pub locktime: u32,
-    pub raw: Vec<u8>, // Raw bytes for serialization
+    pub raw: Vec<u8>,
 }
 
 #[derive(Clone, Debug)]
@@ -82,7 +97,7 @@ impl Transaction {
         for _ in 0..num_inputs {
             let mut prev_txid = [0u8; 32];
             cursor.read_exact(&mut prev_txid)?;
-            prev_txid.reverse(); // TXID is little-endian
+            prev_txid.reverse(); // To little-endian TXID
             let vout = cursor.read_u32::<LittleEndian>()?;
             let script_len = read_varint(&mut cursor)? as usize;
             let mut script_sig = vec![0u8; script_len];
@@ -104,35 +119,32 @@ impl Transaction {
     }
 
     pub fn txid(&self) -> [u8; 32] {
-        // Simplified: hash raw bytes (double SHA256, reverse for TXID)
-        use sha2::{Digest, Sha256};
-        let mut hasher = Sha256::new();
-        hasher.update(&self.raw);
-        let mut hash = hasher.finalize();
-        hasher = Sha256::new();
-        hasher.update(hash);
-        let mut txid: [u8; 32] = [0; 32];
-        txid.copy_from_slice(&hasher.finalize());
-        txid.reverse();
-        txid
+        let mut hash = double_sha256(&self.raw);
+        hash.reverse(); // Little-endian TXID
+        hash
     }
 
-    // Full script/sig verification would go here (e.g., using a script engine crate)
+    pub fn merkle_hash(&self) -> [u8; 32] {
+        double_sha256(&self.raw)
+    }
+
+    // TODO: Implement full BSV script evaluation (e.g., integrate rust-bitcoin-scriptexec or custom VM)
+    // BSV specifics: No SegWit, unlimited script size, etc.
     fn verify_scripts(&self, _prev_outputs: &HashMap<([u8; 32], u32), Output>) -> Result<()> {
-        // Placeholder: Implement full BSV script evaluation
+        // Placeholder: Full implementation required for production
         Ok(())
     }
 }
 
-// BUMP (BRC-74)
-#[derive(Debug)]
+// BUMP structure
+#[derive(Debug, Clone)]
 pub struct Bump {
     pub block_height: u64,
     pub tree_height: u8,
     pub levels: Vec<Vec<Leaf>>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Leaf {
     pub offset: u64,
     pub flags: u8,
@@ -150,14 +162,14 @@ impl Bump {
             for _ in 0..n_leaves {
                 let offset = read_varint(reader)?;
                 let flags = reader.read_u8()?;
-                let hash = match flags {
-                    0x00 | 0x02 => {
-                        let mut h = [0u8; 32];
-                        reader.read_exact(&mut h)?;
-                        Some(h)
-                    }
-                    0x01 => None,
-                    _ => return Err(BeefError::InvalidFlags(flags).into()),
+                let hash = if flags == 0 || flags == 2 {
+                    let mut h = [0u8; 32];
+                    reader.read_exact(&mut h)?;
+                    Some(h)
+                } else if flags == 1 {
+                    None
+                } else {
+                    return Err(ShiaError::InvalidFlags(flags).into());
                 };
                 leaves.push(Leaf { offset, flags, hash });
             }
@@ -182,28 +194,51 @@ impl Bump {
         Ok(())
     }
 
-    // Compute Merkle root (simplified; full impl would verify all paths)
-    pub fn compute_root(&self) -> Result<[u8; 32]> {
-        // Placeholder: Implement full Merkle root calculation from leaves
-        // Use sha2 crate for double SHA256
-        use sha2::{Digest, Sha256};
-        let mut root = [0u8; 32]; // Dummy
-        // ... logic to build tree and hash ...
-        Ok(root)
+    pub fn compute_merkle_root_for_hash(&self, leaf_hash: [u8; 32]) -> Result<[u8; 32]> {
+        // Find the leaf in level 0 with matching hash and flags == 2 (client txid)
+        let level0 = &self.levels[0];
+        let leaf = level0
+            .iter()
+            .find(|l| l.flags == 2 && l.hash == Some(leaf_hash))
+            .ok_or(ShiaError::LeafNotFound)?;
+        let mut current_offset = leaf.offset;
+        let mut working = leaf_hash;
+
+        for level_idx in 0..self.tree_height as usize {
+            let current_level = &self.levels[level_idx];
+            let sibling_offset = current_offset ^ 1;
+            let sibling_leaf = current_level
+                .iter()
+                .find(|l| l.offset == sibling_offset)
+                .ok_or(ShiaError::MissingSibling)?;
+            let sibling_hash = match sibling_leaf.flags {
+                1 => working,
+                0 | 2 => sibling_leaf.hash.ok_or(anyhow!("Hash missing for non-duplicate"))?,
+                _ => return Err(ShiaError::InvalidFlags(sibling_leaf.flags).into()),
+            };
+            let concat = if current_offset % 2 == 0 {
+                [&working[..], &sibling_hash[..]].concat()
+            } else {
+                [&sibling_hash[..], &working[..]].concat()
+            };
+            working = double_sha256(&concat);
+            current_offset /= 2;
+        }
+        Ok(working)
     }
 }
 
-// BEEF struct
+pub trait BlockHeadersClient {
+    fn is_valid_root_for_height(&self, root: [u8; 32], height: u64) -> bool;
+}
+
+// BEEF structure
 #[derive(Debug)]
 pub struct Beef {
     pub is_atomic: bool,
     pub subject_txid: Option<[u8; 32]>,
     pub bumps: Vec<Bump>,
     pub txs: Vec<(Transaction, Option<usize>)>, // (tx, bump_index)
-}
-
-pub trait BlockHeadersClient {
-    fn is_valid_root_for_height(&self, root: [u8; 32], height: u64) -> bool;
 }
 
 impl Beef {
@@ -216,22 +251,20 @@ impl Beef {
         let mut cursor = Cursor::new(bytes);
         let mut is_atomic = false;
         let mut subject_txid = None;
-
-        // Check for Atomic prefix
         let mut prefix = [0u8; 4];
-        if cursor.read_exact(&mut prefix).is_ok() && prefix == [0x01, 0x01, 0x01, 0x01] {
+        cursor.read_exact(&mut prefix)?;
+        if prefix == [0x01, 0x01, 0x01, 0x01] {
             is_atomic = true;
             let mut txid = [0u8; 32];
             cursor.read_exact(&mut txid)?;
             subject_txid = Some(txid);
         } else {
-            // Reset if not atomic
             cursor.set_position(0);
         }
 
         let version = cursor.read_u32::<LittleEndian>()?;
         if version != 4022206465 {
-            return Err(BeefError::InvalidVersion.into());
+            return Err(ShiaError::InvalidVersion.into());
         }
 
         let n_bumps = read_varint(&mut cursor)? as usize;
@@ -243,15 +276,10 @@ impl Beef {
         let n_txs = read_varint(&mut cursor)? as usize;
         let mut txs = Vec::with_capacity(n_txs);
         for _ in 0..n_txs {
-            // Read raw tx length implicitly by parsing until end
-            let mut raw = Vec::new();
-            // Hack: Read remaining to find tx boundary (better: read varint len if needed, but spec has no len prefix)
-            // For simplicity, assume we read until parse succeeds; in practice, use a bounded reader
-            let pos = cursor.position();
-            let remaining = &bytes[pos as usize..];
+            let start_pos = cursor.position() as usize;
+            let remaining = &bytes[start_pos..];
             let tx = Transaction::from_raw(remaining)?;
-            let tx_len = cursor.position() - pos; // Update after parse
-            cursor.set_position(pos + tx_len);
+            let tx_len = cursor.position() as usize - start_pos;
             let has_bump = cursor.read_u8()?;
             let bump_index = if has_bump == 0x01 {
                 Some(read_varint(&mut cursor)? as usize)
@@ -298,81 +326,73 @@ impl Beef {
         Ok(buf)
     }
 
-    // Build BEEF from tx DAG (map of txid -> tx, and bump_map: txid -> bump)
     pub fn build(
         subject_tx: Transaction,
         ancestors: HashMap<[u8; 32], Transaction>,
         bump_map: HashMap<[u8; 32], Bump>,
         is_atomic: bool,
     ) -> Result<Self> {
-        // Kahn's algorithm for topo sort
+        let mut all_txs = ancestors;
+        let subject_txid = subject_tx.txid();
+        all_txs.insert(subject_txid, subject_tx.clone());
+
+        // Build graph: txid -> set of parents (inputs)
         let mut graph: HashMap<[u8; 32], HashSet<[u8; 32]>> = HashMap::new();
         let mut in_degree: HashMap<[u8; 32], u32> = HashMap::new();
-        let all_txs = ancestors.clone();
-        let subject_txid = subject_tx.txid();
-        graph.insert(subject_txid, HashSet::new());
-        in_degree.insert(subject_txid, 0);
-        // Build graph: child -> parents
-        // Actually, for topo: parents first
-        // Inputs are parents
-        for tx in all_txs.values() {
-            let txid = tx.txid();
-            graph.entry(txid).or_insert(HashSet::new());
-            in_degree.entry(txid).or_insert(0);
+        for (txid, tx) in &all_txs {
+            graph.insert(*txid, HashSet::new());
+            *in_degree.entry(*txid).or_insert(0) += 0;
             for input in &tx.inputs {
-                graph.entry(txid).or_insert(HashSet::new()).insert(input.prev_txid);
-                *in_degree.entry(input.prev_txid).or_insert(0) += 1;
+                if all_txs.contains_key(&input.prev_txid) {
+                    graph.get_mut(txid).unwrap().insert(input.prev_txid);
+                    *in_degree.entry(input.prev_txid).or_insert(0) += 1;
+                }
             }
         }
-        // Add subject
-        for input in &subject_tx.inputs {
-            graph.get_mut(&subject_txid).unwrap().insert(input.prev_txid);
-            *in_degree.entry(input.prev_txid).or_insert(0) += 1;
-        }
 
-        // Kahn's
+        // Kahn's algorithm for topo sort (parents first)
         let mut queue: Vec<[u8; 32]> = in_degree.iter().filter(|&(_, &deg)| deg == 0).map(|(&id, _)| id).collect();
         let mut ordered = Vec::new();
-        while let Some(node) = queue.pop() {
+        while !queue.is_empty() {
+            let node = queue.remove(0);
             ordered.push(node);
-            if let Some(children) = graph.get(&node) {
-                for child in children {
-                    if let Some(deg) = in_degree.get_mut(child) {
-                        *deg -= 1;
-                        if *deg == 0 {
-                            queue.push(*child);
-                        }
+            for child in all_txs[&node].inputs.iter().map(|i| i.prev_txid) {
+                if let Some(deg) = in_degree.get_mut(&child) {
+                    *deg -= 1;
+                    if *deg == 0 {
+                        queue.push(child);
                     }
                 }
             }
         }
-        if ordered.len() != graph.len() {
-            return Err(anyhow!("Cycle in tx DAG"));
+        if ordered.len() != all_txs.len() {
+            return Err(anyhow!("Cycle or missing dependencies in tx DAG"));
         }
 
-        // Collect txs in order
+        // Collect in order
         let mut txs = Vec::new();
         let mut bumps = Vec::new();
         let mut bump_indices: HashMap<[u8; 32], usize> = HashMap::new();
         for txid in ordered {
-            let tx = if txid == subject_txid { subject_tx.clone() } else { all_txs.get(&txid).cloned().unwrap() };
-            let bump_index = if let Some(bump) = bump_map.get(&txid) {
-                if let Some(&idx) = bump_indices.get(&txid) {
-                    Some(idx)
-                } else {
+            let tx = all_txs.get(&txid).cloned().unwrap();
+            let bump_index = bump_map.get(&txid).map(|bump| {
+                *bump_indices.entry(txid).or_insert_with(|| {
                     let idx = bumps.len();
                     bumps.push(bump.clone());
-                    bump_indices.insert(txid, idx);
-                    Some(idx)
-                }
-            } else {
-                None
-            };
+                    idx
+                })
+            });
             txs.push((tx, bump_index));
         }
 
-        let mut beef = Self { is_atomic, subject_txid: if is_atomic { Some(subject_txid) } else { None }, bumps, txs };
-        if is_atomic {
+        let beef = Self {
+            is_atomic,
+            subject_txid: if is_atomic { Some(subject_txid) } else { None },
+            bumps,
+            txs,
+        };
+
+        if beef.is_atomic {
             beef.validate_atomic()?;
         }
         Ok(beef)
@@ -380,62 +400,60 @@ impl Beef {
 
     fn validate_atomic(&self) -> Result<()> {
         let subject_txid = self.subject_txid.ok_or(anyhow!("No subject TXID"))?;
-        let subject_tx = self.txs.last().ok_or(anyhow!("No txs"))?.0.clone();
-        if subject_tx.txid() != subject_txid {
-            return Err(BeefError::AtomicMismatch.into());
-        }
-        // Check all txs are ancestors
         let mut ancestors = HashSet::new();
         let mut to_check = vec![subject_txid];
         while let Some(id) = to_check.pop() {
+            if ancestors.contains(&id) {
+                continue;
+            }
             ancestors.insert(id);
-            if let Some(tx) = self.txs.iter().find(|(t, _)| t.txid() == id) {
-                for input in &tx.0.inputs {
+            if let Some((tx, _)) = self.txs.iter().find(|(t, _)| t.txid() == id) {
+                for input in &tx.inputs {
                     to_check.push(input.prev_txid);
                 }
             }
         }
-        if self.txs.len() != ancestors.len() {
-            return Err(BeefError::AtomicMismatch.into());
+        if self.txs.len() != ancestors.len() || !ancestors.contains(&subject_txid) {
+            return Err(ShiaError::AtomicMismatch.into());
         }
         Ok(())
     }
 
-    pub fn verify(&self, headers_client: &impl BlockHeadersClient) -> Result<bool> {
-        // Verify BUMPs
-        for bump in &self.bumps {
-            let root = bump.compute_root()?;
-            if !headers_client.is_valid_root_for_height(root, bump.block_height) {
-                return Err(BeefError::Verification("Invalid Merkle root".to_string()).into());
+    pub fn verify(&self, headers_client: &impl BlockHeadersClient) -> Result<()> {
+        // Verify BUMPs and inclusion
+        for (tx, bump_index) in &self.txs {
+            if let Some(idx) = bump_index {
+                let bump = &self.bumps[*idx];
+                let merkle_hash = tx.merkle_hash();
+                let root = bump.compute_merkle_root_for_hash(merkle_hash)?;
+                if !headers_client.is_valid_root_for_height(root, bump.block_height) {
+                    return Err(ShiaError::Verification("Invalid Merkle root".to_string()).into());
+                }
             }
         }
 
         // Validate tx chain
         let mut utxos: HashMap<([u8; 32], u32), Output> = HashMap::new();
-        for (tx, bump_index) in &self.txs {
-            if let Some(idx) = bump_index {
-                // Confirmed: assume proof valid (already checked root)
-                let bump = &self.bumps[*idx];
-                // Full: Verify tx in bump (check if txid in level 0 with flag 0x02)
-            }
-            // Check inputs
+        for (tx, _) in &self.txs {
             let mut input_value = 0u64;
             for input in &tx.inputs {
                 let key = (input.prev_txid, input.vout);
-                let prev_out = utxos.get(&key).ok_or(anyhow!("Missing UTXO"))?.clone();
+                let prev_out = utxos
+                    .get(&key)
+                    .ok_or(ShiaError::Verification("Missing UTXO".to_string()))?
+                    .clone();
                 input_value += prev_out.value;
-                // Sig check placeholder
             }
             let mut output_value = 0u64;
             for out in &tx.outputs {
                 output_value += out.value;
             }
             if output_value > input_value {
-                return Err(BeefError::Verification("Value mismatch".to_string()).into());
+                return Err(ShiaError::Verification("Value mismatch".to_string()).into());
             }
             tx.verify_scripts(&utxos)?;
 
-            // Add outputs to UTXOs
+            // Add outputs
             let txid = tx.txid();
             for (i, out) in tx.outputs.iter().enumerate() {
                 utxos.insert((txid, i as u32), out.clone());
@@ -446,13 +464,13 @@ impl Beef {
             self.validate_atomic()?;
         }
 
-        Ok(true)
+        Ok(())
     }
 }
 
-// Example usage (in tests)
 #[cfg(test)]
 mod tests {
     use super::*;
-    // Add test cases using sample BEEFHex from TS example
+    // TODO: Add test cases using examples from BRC-62 spec
+    // e.g., parse the hex example, verify serialization round-trip, build and verify a simple BEEF
 }
