@@ -569,7 +569,7 @@ mod tests {
         // Simple P2PKH from rust-sv tests
         let private_key = [1u8; 32];
         let secp = Secp256k1::new();
-        let secret_key = SecretKey::from_slice(&private_key).unwrap();
+        let secret_key = SecretKey::from_byte_array(&private_key).unwrap();
         let public_key = PublicKey::from_secret_key(&secp, &secret_key);
         let pk_bytes = public_key.serialize();
         let pkh = hash160(&pk_bytes);
