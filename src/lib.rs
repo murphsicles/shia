@@ -535,7 +535,8 @@ mod tests {
     }
 
     #[test]
-    fn transaction_from_raw() {
+    #[test]
+fn transaction_from_raw() {
     // Genesis coinbase tx hex
     let hex_str = "01000000010000000000000000000000000000000000000000000000000000000000000000ffffffff4d04ffff001d0104455468652054696d65732030332f4a616e2f32303039204368616e63656c6c6f72206f6e206272696e6b206f66207365636f6e64206261696c6f757420666f722062616e6b73ffffffff0100f2052a01000000434104678afdb0fe5548271967f1a67130b7105cd6a828e03909a67962e0ea1f61deb649f6bc3f4cef38c4f35504e51ec112de5c384df7ba0b8d578a4c702b6bf11d5fac00000000";
     let bytes = hex::decode(hex_str).unwrap();
@@ -548,7 +549,7 @@ mod tests {
     assert_eq!(tx.inputs[0].script_sig.len(), 77); // 4d = 77
     assert_eq!(tx.inputs[0].sequence, 0xffffffff);
     assert_eq!(tx.outputs.len(), 1);
-    assert_eq!(tx.outputs[0].value, 705032704u64); // 00f2052a LE = 705,032,704
+    assert_eq!(tx.outputs[0].value, 705032704u64); // Fixed: 00f2052a LE = 705,032,704
     assert_eq!(tx.outputs[0].script_pubkey.len(), 67); // 43 = 67 (P2PK)
     assert_eq!(tx.locktime, 0);
 
@@ -670,7 +671,7 @@ mod tests {
     #[test]
     fn beef_from_hex_serialize() {
     // Valid minimal non-atomic BEEF: version + 0 bumps + 1 tx (minimal coinbase) + 0x00
-    let minimal_beef_hex = "f1c6c3ef00010100000000000000000000000000000000000000000000000000000000000000000000000000000000000504ffff001dffffffff0100ca9a3b000000001976a914000000000000000000000000000000000000000088ac0000000000";
+    let minimal_beef_hex = "f1c6c3ef00010100000000000000000000000000000000000000000000000000000000000000000000000000000000000504ffff001d0104ffffffff0100ca9a3b000000001976a914000000000000000000000000000000000000000088ac0000000000";
     let beef = Beef::from_hex(minimal_beef_hex).unwrap();
     let serialized = beef.serialize().unwrap();
     let serialized_hex = hex::encode(serialized);
@@ -680,7 +681,7 @@ mod tests {
     #[test]
     fn beef_verify() {
     // Same minimal BEEF as above
-    let minimal_beef_hex = "f1c6c3ef00010100000000000000000000000000000000000000000000000000000000000000000000000000000000000504ffff001dffffffff0100ca9a3b000000001976a914000000000000000000000000000000000000000088ac0000000000";
+    let minimal_beef_hex = "f1c6c3ef00010100000000000000000000000000000000000000000000000000000000000000000000000000000000000504ffff001d0104ffffffff0100ca9a3b000000001976a914000000000000000000000000000000000000000088ac0000000000";
     let beef = Beef::from_hex(minimal_beef_hex).unwrap();
     let mock_client = MockHeadersClient;
     assert!(beef.verify(&mock_client).is_ok());
@@ -715,7 +716,7 @@ mod tests {
     #[test]
     fn beef_validate_atomic() {
     // Valid minimal atomic BEEF: prefix + subject txid + version + 0 bumps + 1 tx + 0x00
-    let tx_raw = "01000000010000000000000000000000000000000000000000000000000000000000000000ffffffff0504ffff001dffffffff0100ca9a3b000000001976a914000000000000000000000000000000000000000088ac00000000";
+    let tx_raw = "01000000010000000000000000000000000000000000000000000000000000000000000000ffffffff0504ffff001d0104ffffffff0100ca9a3b000000001976a914000000000000000000000000000000000000000088ac00000000";
     let tx = Transaction::from_raw(&hex::decode(tx_raw).unwrap()).unwrap();
     let subject_txid = tx.txid();
     let atomic_beef_hex = format!("01010101{}f1c6c3ef0001{}", hex::encode(subject_txid), tx_raw);
@@ -726,5 +727,5 @@ mod tests {
     let mut invalid_beef = beef.clone();
     invalid_beef.subject_txid = Some([0u8; 32]);
     assert!(invalid_beef.validate_atomic().is_err());
-}
+    }
 }
