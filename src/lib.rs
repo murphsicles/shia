@@ -4,8 +4,9 @@ use sha2::{Digest, Sha256};
 use std::collections::{HashMap, HashSet};
 use std::io::{self, Cursor, Read, Write};
 use thiserror::Error;
-use sv::script::Script; // Assuming sv crate has script module
-// Note: Adjust imports based on actual sv crate structure. If sv has a VM or Interpreter, use that.
+use sv::messages::Tx as SvTx;
+use sv::script::{op_codes::OP_CODESEPARATOR, Script as SvScript, TransactionChecker, NO_FLAGS};
+use sv::transaction::sighash::SigHashCache;
 
 #[derive(Error, Debug)]
 pub enum ShiaError {
@@ -68,7 +69,7 @@ fn write_varint<W: Write>(writer: &mut W, n: u64) -> Result<()> {
     Ok(())
 }
 
-// Simplified Transaction
+// Transaction struct (compatible with sv for script eval)
 #[derive(Clone, Debug)]
 pub struct Transaction {
     pub version: u32,
@@ -132,29 +133,29 @@ impl Transaction {
         double_sha256(&self.raw)
     }
 
-    // Script verification using rust-sv
     fn verify_scripts(&self, prev_outputs: &HashMap<([u8; 32], u32), Output>) -> Result<()> {
+        let sv_tx = SvTx::read(&mut Cursor::new(&self.raw))?;
         for (idx, input) in self.inputs.iter().enumerate() {
             let key = (input.prev_txid, input.vout);
             let prev_out = prev_outputs
                 .get(&key)
-                .ok_or(ShiaError::Verification("Missing UTXO".to_string()))?;
-            let script_sig_bytes = &input.script_sig;
-            let script_pubkey_bytes = &prev_out.script_pubkey;
-
-            // Parse scripts using rust-sv
-            let script_sig = Script::new(script_sig_bytes); // Assuming Script::new or from_bytes
-            let script_pubkey = Script::new(script_pubkey_bytes);
-
-            // Execute/evaluate the script
-            // Adjust based on actual rust-sv API; assuming a verify function that takes tx context
-            // For BSV, verification needs sighash, amount, etc.
-            let amount = prev_out.value;
-            let flags = sv::script::VerificationFlags::default(); // Assuming flags exist
-            if !sv::script::verify(&script_sig, &script_pubkey, self, idx as u32, amount, flags) {
-                return Err(ShiaError::ScriptEval(format!("Script failed for input {}", idx)).into());
-            }
-            
+                .ok_or(ShiaError::Verification("Missing UTXO".to_string()))?
+                .clone();
+            let script_sig = SvScript(input.script_sig.clone());
+            let script_pubkey = SvScript(prev_out.script_pubkey.clone());
+            let mut combined_script = SvScript::new();
+            combined_script.append_slice(&script_sig.0);
+            combined_script.append(OP_CODESEPARATOR);
+            combined_script.append_slice(&script_pubkey.0);
+            let mut sig_hash_cache = SigHashCache::new();
+            let mut checker = TransactionChecker {
+                tx: &sv_tx,
+                sig_hash_cache: &mut sig_hash_cache,
+                input: idx,
+                satoshis: prev_out.value as i64,
+                require_sighash_forkid: false,
+            };
+            combined_script.eval(&mut checker, NO_FLAGS).map_err(|e| ShiaError::ScriptEval(e.to_string()))?;
         }
         Ok(())
     }
@@ -177,7 +178,6 @@ pub struct Leaf {
 
 impl Bump {
     pub fn deserialize(reader: &mut impl Read) -> Result<Self> {
-        // ... (unchanged)
         let block_height = read_varint(reader)?;
         let tree_height = reader.read_u8()?;
         let mut levels = Vec::with_capacity(tree_height as usize);
@@ -204,7 +204,6 @@ impl Bump {
     }
 
     pub fn serialize(&self, writer: &mut impl Write) -> Result<()> {
-        // ... (unchanged)
         write_varint(writer, self.block_height)?;
         writer.write_u8(self.tree_height)?;
         for level in &self.levels {
@@ -221,7 +220,6 @@ impl Bump {
     }
 
     pub fn compute_merkle_root_for_hash(&self, leaf_hash: [u8; 32]) -> Result<[u8; 32]> {
-        // ... (unchanged)
         let level0 = &self.levels[0];
         let leaf = level0
             .iter()
@@ -258,7 +256,7 @@ pub trait BlockHeadersClient {
     fn is_valid_root_for_height(&self, root: [u8; 32], height: u64) -> bool;
 }
 
-// BEEF structure (unchanged)
+// BEEF structure
 #[derive(Debug)]
 pub struct Beef {
     pub is_atomic: bool,
@@ -268,10 +266,188 @@ pub struct Beef {
 }
 
 impl Beef {
-    // ... (deserialize, serialize, build, validate_atomic unchanged)
+    pub fn from_hex(hex: &str) -> Result<Self> {
+        let bytes = hex::decode(hex)?;
+        Self::deserialize(&bytes)
+    }
+
+    pub fn deserialize(bytes: &[u8]) -> Result<Self> {
+        let mut cursor = Cursor::new(bytes);
+        let mut is_atomic = false;
+        let mut subject_txid = None;
+        let mut prefix = [0u8; 4];
+        cursor.read_exact(&mut prefix)?;
+        if prefix == [0x01, 0x01, 0x01, 0x01] {
+            is_atomic = true;
+            let mut txid = [0u8; 32];
+            cursor.read_exact(&mut txid)?;
+            subject_txid = Some(txid);
+        } else {
+            cursor.set_position(0);
+        }
+
+        let version = cursor.read_u32::<LittleEndian>()?;
+        if version != 4022206465 {
+            return Err(ShiaError::InvalidVersion.into());
+        }
+
+        let n_bumps = read_varint(&mut cursor)? as usize;
+        let mut bumps = Vec::with_capacity(n_bumps);
+        for _ in 0..n_bumps {
+            bumps.push(Bump::deserialize(&mut cursor)?);
+        }
+
+        let n_txs = read_varint(&mut cursor)? as usize;
+        let mut txs = Vec::with_capacity(n_txs);
+        for _ in 0..n_txs {
+            let start_pos = cursor.position() as usize;
+            let remaining = &bytes[start_pos..];
+            let tx = Transaction::from_raw(remaining)?;
+            let tx_len = cursor.position() as usize - start_pos;
+            let has_bump = cursor.read_u8()?;
+            let bump_index = if has_bump == 0x01 {
+                Some(read_varint(&mut cursor)? as usize)
+            } else if has_bump == 0x00 {
+                None
+            } else {
+                return Err(anyhow!("Invalid has_bump: {}", has_bump));
+            };
+            txs.push((tx, bump_index));
+        }
+
+        let beef = Self { is_atomic, subject_txid, bumps, txs };
+
+        if beef.is_atomic {
+            beef.validate_atomic()?;
+        }
+
+        Ok(beef)
+    }
+
+    pub fn serialize(&self) -> Result<Vec<u8>> {
+        let mut buf = Vec::new();
+        if self.is_atomic {
+            buf.write_all(&[0x01, 0x01, 0x01, 0x01])?;
+            if let Some(txid) = self.subject_txid {
+                buf.write_all(&txid)?;
+            }
+        }
+        buf.write_u32::<LittleEndian>(4022206465)?;
+        write_varint(&mut buf, self.bumps.len() as u64)?;
+        for bump in &self.bumps {
+            bump.serialize(&mut buf)?;
+        }
+        write_varint(&mut buf, self.txs.len() as u64)?;
+        for (tx, bump_index) in &self.txs {
+            buf.write_all(&tx.raw)?;
+            if let Some(idx) = bump_index {
+                buf.write_u8(0x01)?;
+                write_varint(&mut buf, *idx as u64)?;
+            } else {
+                buf.write_u8(0x00)?;
+            }
+        }
+        Ok(buf)
+    }
+
+    pub fn build(
+        subject_tx: Transaction,
+        ancestors: HashMap<[u8; 32], Transaction>,
+        bump_map: HashMap<[u8; 32], Bump>,
+        is_atomic: bool,
+    ) -> Result<Self> {
+        let mut all_txs = ancestors;
+        let subject_txid = subject_tx.txid();
+        all_txs.insert(subject_txid, subject_tx.clone());
+
+        // Build graph: txid -> set of children
+        let mut graph: HashMap<[u8; 32], HashSet<[u8; 32]>> = HashMap::new();
+        let mut in_degree: HashMap<[u8; 32], u32> = HashMap::new();
+        for (txid, tx) in &all_txs {
+            graph.insert(*txid, HashSet::new());
+            in_degree.entry(*txid).or_insert(0);
+            for input in &tx.inputs {
+                if all_txs.contains_key(&input.prev_txid) {
+                    graph.entry(input.prev_txid).or_insert(HashSet::new()).insert(*txid);
+                    *in_degree.entry(*txid).or_insert(0) += 1;
+                }
+            }
+        }
+
+        // Kahn's algorithm for topo sort (parents first)
+        let mut queue: Vec<[u8; 32]> = in_degree.iter().filter(|&(_, &deg)| deg == 0).map(|(&id, _)| id).collect();
+        let mut ordered = Vec::new();
+        while !queue.is_empty() {
+            queue.sort(); // For stable order if needed
+            let node = queue.remove(0);
+            ordered.push(node);
+            if let Some(children) = graph.get(&node) {
+                for &child in children {
+                    if let Some(deg) = in_degree.get_mut(&child) {
+                        *deg -= 1;
+                        if *deg == 0 {
+                            queue.push(child);
+                        }
+                    }
+                }
+            }
+        }
+        if ordered.len() != all_txs.len() {
+            return Err(anyhow!("Cycle or missing dependencies in tx DAG"));
+        }
+
+        // Collect in order
+        let mut txs = Vec::new();
+        let mut bumps = Vec::new();
+        let mut bump_indices: HashMap<[u8; 32], usize> = HashMap::new();
+        for txid in ordered {
+            let tx = all_txs.get(&txid).cloned().unwrap();
+            let bump_index = bump_map.get(&txid).map(|bump| {
+                *bump_indices.entry(txid).or_insert_with(|| {
+                    let idx = bumps.len();
+                    bumps.push(bump.clone());
+                    idx
+                })
+            });
+            txs.push((tx, bump_index));
+        }
+
+        let beef = Self {
+            is_atomic,
+            subject_txid: if is_atomic { Some(subject_txid) } else { None },
+            bumps,
+            txs,
+        };
+
+        if beef.is_atomic {
+            beef.validate_atomic()?;
+        }
+        Ok(beef)
+    }
+
+    fn validate_atomic(&self) -> Result<()> {
+        let subject_txid = self.subject_txid.ok_or(anyhow!("No subject TXID"))?;
+        let mut ancestors = HashSet::new();
+        let mut to_check = vec![subject_txid];
+        while let Some(id) = to_check.pop() {
+            if ancestors.contains(&id) {
+                continue;
+            }
+            ancestors.insert(id);
+            if let Some((tx, _)) = self.txs.iter().find(|(t, _)| t.txid() == id) {
+                for input in &tx.inputs {
+                    to_check.push(input.prev_txid);
+                }
+            }
+        }
+        if self.txs.len() != ancestors.len() || !ancestors.contains(&subject_txid) {
+            return Err(ShiaError::AtomicMismatch.into());
+        }
+        Ok(())
+    }
 
     pub fn verify(&self, headers_client: &impl BlockHeadersClient) -> Result<()> {
-        // Verify BUMPs and inclusion (unchanged)
+        // Verify BUMPs and inclusion
         for (tx, bump_index) in &self.txs {
             if let Some(idx) = bump_index {
                 let bump = &self.bumps[*idx];
@@ -302,7 +478,7 @@ impl Beef {
             if output_value > input_value {
                 return Err(ShiaError::Verification("Value mismatch".to_string()).into());
             }
-            tx.verify_scripts(&utxos)?; // Now calls the integrated script verification
+            tx.verify_scripts(&utxos)?;
 
             // Add outputs
             let txid = tx.txid();
@@ -322,5 +498,5 @@ impl Beef {
 #[cfg(test)]
 mod tests {
     use super::*;
-    // TODO: Add test cases, including ones that exercise script evaluation with sample txs
+    // TODO: Add test cases using examples from BRC-62 spec
 }
