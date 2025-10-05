@@ -33,8 +33,15 @@ pub mod utils;
 /// Core BEEF struct for bundling and verification.
 pub use beef::Beef;
 
+#[cfg(feature = "paymail")]
+pub mod paymail
 /// BSV Transaction wrapper for parsing and script eval.
+
 pub use tx::Transaction;
 
 /// Pluggable trait for block headers/Merkle root checks.
 pub use client::BlockHeadersClient;
+
+/// Paymail envelope for BEEF payloads (BRC-70, feature-gated).
+#[cfg(feature = "paymail")]
+pub use paymail::PaymailEnvelope;
