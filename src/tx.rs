@@ -54,32 +54,33 @@ impl Transaction {
     /// # Errors
     /// - IO or VarInt errors during deserialization.
     pub fn from_raw(raw: &[u8]) -> Result<Self> {
-        let mut cursor = Cursor::new(raw);
-        let version = cursor.read_u32::<LittleEndian>()?;
-        let num_inputs = crate::utils::read_varint(&mut cursor)? as usize;
+        let mut local_cursor = Cursor::new(raw);
+        let version = local_cursor.read_u32::<LittleEndian>()?;
+        let num_inputs = crate::utils::read_varint(&mut local_cursor)? as usize;
         let mut inputs = Vec::with_capacity(num_inputs);
         for _ in 0..num_inputs {
             let mut prev_txid = [0u8; 32];
-            cursor.read_exact(&mut prev_txid)?;
+            local_cursor.read_exact(&mut prev_txid)?;
             prev_txid.reverse(); // To little-endian TXID
-            let vout = cursor.read_u32::<LittleEndian>()?;
-            let script_len = crate::utils::read_varint(&mut cursor)? as usize;
+            let vout = local_cursor.read_u32::<LittleEndian>()?;
+            let script_len = crate::utils::read_varint(&mut local_cursor)? as usize;
             let mut script_sig = vec![0u8; script_len];
-            cursor.read_exact(&mut script_sig)?;
-            let sequence = cursor.read_u32::<LittleEndian>()?;
+            local_cursor.read_exact(&mut script_sig)?;
+            let sequence = local_cursor.read_u32::<LittleEndian>()?;
             inputs.push(Input { prev_txid, vout, script_sig, sequence });
         }
-        let num_outputs = crate::utils::read_varint(&mut cursor)? as usize;
+        let num_outputs = crate::utils::read_varint(&mut local_cursor)? as usize;
         let mut outputs = Vec::with_capacity(num_outputs);
         for _ in 0..num_outputs {
-            let value = cursor.read_u64::<LittleEndian>()?;
-            let script_len = crate::utils::read_varint(&mut cursor)? as usize;
+            let value = local_cursor.read_u64::<LittleEndian>()?;
+            let script_len = crate::utils::read_varint(&mut local_cursor)? as usize;
             let mut script_pubkey = vec![0u8; script_len];
-            cursor.read_exact(&mut script_pubkey)?;
+            local_cursor.read_exact(&mut script_pubkey)?;
             outputs.push(Output { value, script_pubkey });
         }
-        let locktime = cursor.read_u32::<LittleEndian>()?;
-        Ok(Self { version, inputs, outputs, locktime, raw: raw.to_vec() })
+        let locktime = local_cursor.read_u32::<LittleEndian>()?;
+        let consumed = local_cursor.position() as usize;
+        Ok(Self { version, inputs, outputs, locktime, raw: raw[0..consumed].to_vec() })
     }
 
     /// Computes TXID (double SHA256 of raw, big-endian).
@@ -153,7 +154,7 @@ mod tests {
         assert_eq!(tx.inputs[0].script_sig.len(), 77);
         assert_eq!(tx.inputs[0].sequence, 0xffffffff);
         assert_eq!(tx.outputs.len(), 1);
-        assert_eq!(tx.outputs[0].value, 5_000_000_000u64);
+        assert_eq!(tx.outputs[0].value, 50_000_000u64);
         assert_eq!(tx.outputs[0].script_pubkey.len(), 67);
         assert_eq!(tx.locktime, 0);
 
