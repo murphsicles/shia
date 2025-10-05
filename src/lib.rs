@@ -5,7 +5,7 @@
 //! ```
 //! use shia::{Beef, BlockHeadersClient};
 //! # use std::collections::HashMap;
-//! # use shia::Transaction;
+//! # use shia::tx::Transaction;
 //! let beef = Beef::build(subject_tx, ancestors, bump_map, false).unwrap();
 //! beef.verify(&my_client).unwrap();
 //! ```
@@ -15,7 +15,7 @@
 //! |-----|--------|-------|
 //! | 62  | ✅ Full | Core BEEF format/validation |
 //! | 95  | ✅ Full | Atomic mode |
-//! | 70  | 🔄 Planned | Paymail envelopes |
+//! | 70  | ✅ Full | Paymail envelopes (feature = "paymail") |
 //! | 45  | ⏳ Planned | UTXO token checks |
 //! | 96  | ⏳ Planned | TxID-only extension |
 
@@ -27,16 +27,14 @@ pub mod beef;
 pub mod bump;
 pub mod client;
 pub mod errors;
+pub mod paymail;
 pub mod tx;
 pub mod utils;
 
 /// Core BEEF struct for bundling and verification.
 pub use beef::Beef;
 
-#[cfg(feature = "paymail")]
-pub mod paymail
 /// BSV Transaction wrapper for parsing and script eval.
-
 pub use tx::Transaction;
 
 /// Pluggable trait for block headers/Merkle root checks.
