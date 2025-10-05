@@ -4,7 +4,7 @@ use crate::atomic::validate_atomic;
 use crate::bump::Bump;
 use crate::client::BlockHeadersClient;
 use crate::errors::{Result, ShiaError};
-use crate::tx::{Input, Output, Transaction};
+use crate::tx::{Output, Transaction};
 use crate::utils::{read_varint, write_varint};
 use anyhow::anyhow;
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
