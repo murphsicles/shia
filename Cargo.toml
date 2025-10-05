@@ -11,5 +11,14 @@ anyhow = "1.0.100"
 sha2 = "0.10.9"
 sv = { git = "https://github.com/murphsicles/rust-sv", tag = "v0.5.2" }
 
+# Feature-gated deps for Paymail (BRC-70)
+serde = { version = "1.0", features = ["derive"], optional = true }
+serde_json = { version = "1.0", optional = true }
+base64 = { version = "0.22", optional = true }
+
+[features]
+default = []
+paymail = ["dep:serde", "dep:serde_json", "dep:base64"]
+
 [dev-dependencies]
 secp256k1 = "0.31.1"
