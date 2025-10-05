@@ -11,7 +11,7 @@ pub fn double_sha256(data: &[u8]) -> [u8; 32] {
     hasher.update(data);
     let hash1 = hasher.finalize();
     let mut hasher = Sha256::new();
-    hasher.update(&hash1);
+    hasher.update(hash1);
     hasher.finalize().into()
 }
 
@@ -28,24 +28,24 @@ pub fn read_varint<R: Read>(reader: &mut R) -> Result<u64> {
         0xfd => {
             let val = reader.read_u16::<LittleEndian>()? as u64;
             if val < 0xfd {
-                return Err(crate::errors::ShiaError::InvalidVarInt.into());
+                return Err(crate::errors::ShiaError::InvalidVarInt);
             }
             Ok(val)
         }
         0xfe => {
             let val = reader.read_u32::<LittleEndian>()? as u64;
             if val < 0x10000 {
-                return Err(crate::errors::ShiaError::InvalidVarInt.into());
+                return Err(crate::errors::ShiaError::InvalidVarInt);
             }
             Ok(val)
         }
         0xff => {
             let val = reader.read_u64::<LittleEndian>()?;
             if val < 0x100000000 {
-                return Err(crate::errors::ShiaError::InvalidVarInt.into());
+                return Err(crate::errors::ShiaError::InvalidVarInt);
             }
             if val > usize::MAX as u64 {
-                return Err(crate::errors::ShiaError::InvalidVarInt.into());
+                return Err(crate::errors::ShiaError::InvalidVarInt);
             }
             Ok(val)
         }
