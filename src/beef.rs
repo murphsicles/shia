@@ -4,15 +4,12 @@ use crate::atomic::validate_atomic;
 use crate::bump::Bump;
 use crate::client::BlockHeadersClient;
 use crate::errors::{Result, ShiaError};
-use crate::tx::{Input, Output, Transaction};
-use crate::utils::{read_varint, write_varint};
+use crate::tx::Transaction;
+use crate::utils::double_sha256;
 use anyhow::anyhow;
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use std::collections::{HashMap, HashSet};
-use std::io::{Cursor, Read, Write};
-
-use sha2::Digest;
-use sha2::Sha256;
+use std::io::{Cursor, Read};
 
 /// BEEF bundle: Transactions with ancestry and BUMP proofs.
 #[derive(Debug, Clone)]
@@ -57,31 +54,28 @@ impl Beef {
             return Err(ShiaError::InvalidVersion.into());
         }
 
-        let n_bumps = read_varint(&mut cursor)? as usize;
+        let n_bumps = crate::utils::read_varint(&mut cursor)? as usize;
         let mut bumps = Vec::with_capacity(n_bumps);
         for _ in 0..n_bumps {
             bumps.push(Bump::deserialize(&mut cursor)?);
         }
 
-        let n_txs = read_varint(&mut cursor)? as usize;
+        let n_txs = crate::utils::read_varint(&mut cursor)? as usize;
         let mut txs = Vec::with_capacity(n_txs);
-        let mut pos = cursor.position() as usize;
         for _ in 0..n_txs {
-            // Find tx end by reading until next byte after tx
-            let tx_start = pos;
-            let tx = Transaction::from_raw(&bytes[tx_start..])?;  // Temp full read; adjust cursor
-            pos += tx.raw.len();
-            cursor.set_position(pos as u64);
+            let tx_start = cursor.position();
+            let tx = Transaction::from_raw(&bytes[tx_start as usize..])?;
+            let tx_len = tx.raw.len() as u64;
+            cursor.set_position(tx_start + tx_len);
             let has_bump = cursor.read_u8()?;
             let bump_index = if has_bump == 0x01 {
-                Some(read_varint(&mut cursor)? as usize)
+                Some(crate::utils::read_varint(&mut cursor)? as usize)
             } else if has_bump == 0x00 {
                 None
             } else {
                 return Err(anyhow!("Invalid has_bump: {}", has_bump).into());
             };
             txs.push((tx, bump_index));
-            pos = cursor.position() as usize;
         }
 
         let beef = Self { is_atomic, subject_txid, bumps, txs };
@@ -104,16 +98,16 @@ impl Beef {
             }
         }
         buf.write_u32::<LittleEndian>(4_022_206_465u32)?;
-        write_varint(&mut buf, self.bumps.len() as u64)?;
+        crate::utils::write_varint(&mut buf, self.bumps.len() as u64)?;
         for bump in &self.bumps {
             bump.serialize(&mut buf)?;
         }
-        write_varint(&mut buf, self.txs.len() as u64)?;
+        crate::utils::write_varint(&mut buf, self.txs.len() as u64)?;
         for (tx, bump_index) in &self.txs {
             buf.extend_from_slice(&tx.raw);
             if let Some(idx) = bump_index {
                 buf.write_u8(0x01)?;
-                write_varint(&mut buf, *idx as u64)?;
+                crate::utils::write_varint(&mut buf, *idx as u64)?;
             } else {
                 buf.write_u8(0x00)?;
             }
@@ -177,8 +171,8 @@ impl Beef {
         let mut bump_indices: HashMap<[u8; 32], usize> = HashMap::new();
         for &txid in &ordered {
             let tx = all_txs.remove(&txid).unwrap();
-            let bump_index = bump_map.get(&txid).and_then(|bump| {
-                bump_indices.entry(txid).or_insert_with(|| {
+            let bump_index = bump_map.get(&txid).map(|bump| {
+                *bump_indices.entry(txid).or_insert_with(|| {
                     let idx = bumps.len();
                     bumps.push(bump.clone());
                     idx
