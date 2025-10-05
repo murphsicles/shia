@@ -9,8 +9,9 @@
 compile_error!("Paymail support requires the 'paymail' feature.");
 
 use crate::beef::Beef;
+use crate::client::BlockHeadersClient;
 use crate::errors::{Result, ShiaError};
-use base64::{engine::general_purpose::STANDARD, Engine as _};
+use base64::{engine::general_purpose, Engine as _};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -46,7 +47,7 @@ impl PaymailEnvelope {
         metadata: Option<HashMap<String, serde_json::Value>>,
     ) -> Result<Self> {
         let beef_bytes = beef.serialize()?;
-        let beef_b64 = STANDARD.encode(&beef_bytes);
+        let beef_b64 = general_purpose::STANDARD.encode(&beef_bytes);
         Ok(Self {
             beef: beef_b64,
             proofs,
@@ -71,7 +72,8 @@ impl PaymailEnvelope {
     /// # Errors
     /// - Base64 decode or BEEF parse fails.
     pub fn to_beef(&self) -> Result<Beef> {
-        let beef_bytes = STANDARD.decode(&self.beef)
+        let beef_bytes = general_purpose::STANDARD
+            .decode(&self.beef)
             .map_err(|e| ShiaError::Verification(format!("Base64 decode: {}", e)))?;
         Beef::deserialize(&beef_bytes)
     }
@@ -79,7 +81,7 @@ impl PaymailEnvelope {
     /// Validates the envelope: Decodes BEEF and runs full verification.
     /// # Args
     /// - `headers_client`: For Merkle root checks.
-    pub fn verify(&self, headers_client: &impl crate::client::BlockHeadersClient) -> Result<()> {
+    pub fn verify(&self, headers_client: &impl BlockHeadersClient) -> Result<()> {
         let beef = self.to_beef()?;
         beef.verify(headers_client)
     }
@@ -88,14 +90,16 @@ impl PaymailEnvelope {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::client::MockHeadersClient;
     use crate::beef::Beef;
+    use crate::client::MockHeadersClient;
+    use crate::tx::Transaction;
+    use hex;
     use std::collections::HashMap;
 
     #[test]
     fn test_from_beef_roundtrip() {
         let subject_raw = hex::decode("01000000010000000000000000000000000000000000000000000000000000000000000000ffffffff0504ffff001dffffffff0100ca9a3b000000001976a914000000000000000000000000000000000000000088ac00000000").unwrap();
-        let subject_tx = crate::tx::Transaction::from_raw(&subject_raw).unwrap();
+        let subject_tx = Transaction::from_raw(&subject_raw).unwrap();
         let ancestors = HashMap::new();
         let bump_map = HashMap::new();
         let beef = Beef::build(subject_tx, ancestors, bump_map, false).unwrap();
