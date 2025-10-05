@@ -1,13 +1,12 @@
 //! Atomic BEEF validation: Subject TX + direct ancestors only (BRC-95).
 
 use crate::beef::Beef;
-use crate::errors::{Result, ShiaError};
+use crate::errors::Result;
 use std::collections::HashSet;
-use anyhow::anyhow;
 
 /// Validates atomic constraints: No extraneous TXs beyond subject ancestry.
 pub fn validate_atomic(beef: &Beef) -> Result<()> {
-    let subject_txid = beef.subject_txid.ok_or(anyhow!("No subject TXID"))?;
+    let subject_txid = beef.subject_txid.ok_or(anyhow::anyhow!("No subject TXID"))?;
     let mut ancestors = HashSet::new();
     let mut to_check = vec![subject_txid];
     while let Some(id) = to_check.pop() {
@@ -21,7 +20,7 @@ pub fn validate_atomic(beef: &Beef) -> Result<()> {
         }
     }
     if beef.txs.len() != ancestors.len() || !ancestors.contains(&subject_txid) {
-        return Err(ShiaError::AtomicMismatch.into());
+        return Err(crate::errors::ShiaError::AtomicMismatch.into());
     }
     Ok(())
 }
