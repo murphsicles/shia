@@ -4,11 +4,15 @@ use crate::atomic::validate_atomic;
 use crate::bump::Bump;
 use crate::client::BlockHeadersClient;
 use crate::errors::{Result, ShiaError};
-use crate::transaction::Transaction;
-use crate::utils::{double_sha256, read_varint, write_varint};
+use crate::tx::{Input, Output, Transaction};
+use crate::utils::{read_varint, write_varint};
 use anyhow::anyhow;
+use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use std::collections::{HashMap, HashSet};
 use std::io::{Cursor, Read, Write};
+
+use sha2::Digest;
+use sha2::Sha256;
 
 /// BEEF bundle: Transactions with ancestry and BUMP proofs.
 #[derive(Debug, Clone)]
@@ -48,7 +52,7 @@ impl Beef {
             cursor.set_position(0);
         }
 
-        let version = cursor.read_u32::<byteorder::LittleEndian>()?;
+        let version = cursor.read_u32::<LittleEndian>()?;
         if version != 4_022_206_465u32 {  // 0100BEEF LE
             return Err(ShiaError::InvalidVersion.into());
         }
@@ -61,13 +65,13 @@ impl Beef {
 
         let n_txs = read_varint(&mut cursor)? as usize;
         let mut txs = Vec::with_capacity(n_txs);
+        let mut pos = cursor.position() as usize;
         for _ in 0..n_txs {
-            let start_pos = cursor.position() as usize;
-            let remaining_len = bytes.len() - start_pos;
-            let tx_raw = &bytes[start_pos..start_pos + remaining_len.min(1024 * 1024)];  // Sanity cap
-            let tx = Transaction::from_raw(tx_raw)?;
-            let tx_consumed = cursor.position() as usize - start_pos;
-            cursor.set_position((start_pos + tx_consumed) as u64);
+            // Find tx end by reading until next byte after tx
+            let tx_start = pos;
+            let tx = Transaction::from_raw(&bytes[tx_start..])?;  // Temp full read; adjust cursor
+            pos += tx.raw.len();
+            cursor.set_position(pos as u64);
             let has_bump = cursor.read_u8()?;
             let bump_index = if has_bump == 0x01 {
                 Some(read_varint(&mut cursor)? as usize)
@@ -77,6 +81,7 @@ impl Beef {
                 return Err(anyhow!("Invalid has_bump: {}", has_bump).into());
             };
             txs.push((tx, bump_index));
+            pos = cursor.position() as usize;
         }
 
         let beef = Self { is_atomic, subject_txid, bumps, txs };
@@ -98,7 +103,7 @@ impl Beef {
                 buf.extend_from_slice(&txid);
             }
         }
-        buf.write_u32::<byteorder::LittleEndian>(4_022_206_465u32)?;
+        buf.write_u32::<LittleEndian>(4_022_206_465u32)?;
         write_varint(&mut buf, self.bumps.len() as u64)?;
         for bump in &self.bumps {
             bump.serialize(&mut buf)?;
@@ -147,7 +152,7 @@ impl Beef {
         }
 
         // Kahn's topo sort
-        let mut queue: Vec<[u8; 32]> = in_degree.iter().filter(|&(_, deg)| *deg == 0).map(|(&id, _)| id).collect();
+        let mut queue: Vec<_> = in_degree.iter().filter(|&(_, deg)| *deg == 0).map(|(&id, _)| id).collect();
         let mut ordered = Vec::new();
         while let Some(node) = queue.pop() {
             ordered.push(node);
@@ -197,7 +202,7 @@ impl Beef {
 
     /// Full SPV verification: BUMPs, fees, scripts, atomic checks.
     /// # Args
-    /// - `headers_client`: For Merkle root validation.
+    /// - `headers_client`: For Merkle root checks.
     pub fn verify(&self, headers_client: &impl BlockHeadersClient) -> Result<()> {
         // Verify BUMPs
         for (tx, bump_index) in &self.txs {
@@ -240,13 +245,24 @@ impl Beef {
 
         Ok(())
     }
+
+    /// Wraps this BEEF in a Paymail envelope (BRC-70).
+    #[cfg(feature = "paymail")]
+    pub fn to_paymail_envelope(
+        &self,
+        proofs: Option<Vec<String>>,
+        metadata: Option<HashMap<String, serde_json::Value>>,
+    ) -> Result<crate::paymail::PaymailEnvelope> {
+        crate::paymail::PaymailEnvelope::from_beef(self, proofs, metadata)
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::client::MockHeadersClient;
-    use hex_literal::hex;
+    use hex;
+    use std::collections::HashMap;
 
     #[test]
     fn test_beef_from_hex_serialize() {
@@ -267,7 +283,7 @@ mod tests {
 
     #[test]
     fn test_beef_build_simple() {
-        let subject_raw = hex!("01000000010000000000000000000000000000000000000000000000000000000000000000ffffffff0504ffff001dffffffff0100ca9a3b000000001976a914000000000000000000000000000000000000000088ac00000000");
+        let subject_raw = hex::decode("01000000010000000000000000000000000000000000000000000000000000000000000000ffffffff0504ffff001dffffffff0100ca9a3b000000001976a914000000000000000000000000000000000000000088ac00000000").unwrap();
         let subject_tx = Transaction::from_raw(&subject_raw).unwrap();
         let ancestors = HashMap::new();
         let bump_map = HashMap::new();
