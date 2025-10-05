@@ -27,9 +27,11 @@ pub mod beef;
 pub mod bump;
 pub mod client;
 pub mod errors;
-pub mod paymail;
 pub mod tx;
 pub mod utils;
+
+#[cfg(feature = "paymail")]
+pub mod paymail;
 
 /// Core BEEF struct for bundling and verification.
 pub use beef::Beef;
