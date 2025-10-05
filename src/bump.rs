@@ -2,7 +2,9 @@
 
 use crate::errors::{Result, ShiaError};
 use crate::utils::{read_varint, write_varint, double_sha256};
+use byteorder::{ReadBytesExt, WriteBytesExt};
 use std::io::{Read, Write};
+use anyhow::anyhow;
 
 /// Leaf node in a BUMP level.
 #[derive(Debug, Clone)]
@@ -96,7 +98,7 @@ impl Bump {
                 .ok_or(ShiaError::MissingSibling)?;
             let sibling_hash = match sibling_leaf.flags {
                 1 => working,  // Mirror
-                0 | 2 => sibling_leaf.hash.ok_or(anyhow::anyhow!("Hash missing"))?,
+                0 | 2 => sibling_leaf.hash.ok_or(anyhow!("Hash missing for non-duplicate"))?,
                 _ => return Err(ShiaError::InvalidFlags(sibling_leaf.flags).into()),
             };
             let concat = if current_offset % 2 == 0 {
