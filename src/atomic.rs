@@ -58,6 +58,7 @@ mod tests {
     use super::*;
     use crate::beef::Beef;
     use crate::tx::Transaction;
+    use std::collections::HashMap;
     use hex;
     
     #[test]
@@ -123,10 +124,13 @@ mod tests {
         let tx1 = Transaction::from_raw(&tx1_raw).expect("Parse failed");
         let tx2 = Transaction::from_raw(&tx2_raw).expect("Parse failed");
         
-        let mut beef = Beef::new();
-        beef.subject_txid = Some(tx1.txid());
-        beef.txs.push((tx1, vec![]));
-        beef.txs.push((tx2, vec![]));  // Extra unrelated transaction
+        // Construct a BEEF with two unrelated transactions
+        let mut beef = Beef {
+            version: 1,
+            bump_map: HashMap::new(),
+            subject_txid: Some(tx1.txid()),
+            txs: vec![(tx1, vec![]), (tx2, vec![])],  // Extra unrelated transaction
+        };
         
         assert!(validate_atomic(&beef).is_err());
     }
@@ -144,9 +148,14 @@ mod tests {
         ).unwrap();
         
         let tx = Transaction::from_raw(&coinbase_raw).expect("Parse failed");
-        let mut beef = Beef::new();
-        beef.subject_txid = Some(tx.txid());
-        beef.txs.push((tx, vec![]));
+        
+        // Construct a minimal BEEF with just the coinbase transaction
+        let beef = Beef {
+            version: 1,
+            bump_map: HashMap::new(),
+            subject_txid: Some(tx.txid()),
+            txs: vec![(tx, vec![])],
+        };
         
         // Should validate - coinbase has no ancestors to follow
         assert!(validate_atomic(&beef).is_ok());
