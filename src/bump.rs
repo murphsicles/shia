@@ -126,15 +126,15 @@ mod tests {
         let root = double_sha256(&concat);
 
         let mut bump_bytes = Vec::new();
-        write_varint(&mut bump_bytes, 1).unwrap(); // height
+        write_varint(&mut bump_bytes, 1u64).unwrap(); // block height
         bump_bytes.write_u8(1).unwrap(); // tree height
-        write_varint(&mut bump_bytes, 2).unwrap(); // 2 leaves
-        write_varint(&mut bump_bytes, 0).unwrap(); // offset 0
+        write_varint(&mut bump_bytes, 2u64).unwrap(); // 2 leaves
+        write_varint(&mut bump_bytes, 0u64).unwrap(); // offset 0
         bump_bytes.write_u8(2).unwrap(); // flag 2
-        bump_bytes.write_all(&tx1_hash).unwrap();
-        write_varint(&mut bump_bytes, 1).unwrap(); // offset 1
+        bump_bytes.extend_from_slice(&tx1_hash);
+        write_varint(&mut bump_bytes, 1u64).unwrap(); // offset 1
         bump_bytes.write_u8(0).unwrap(); // flag 0
-        bump_bytes.write_all(&tx2_hash).unwrap();
+        bump_bytes.extend_from_slice(&tx2_hash);
 
         let mut cursor = Cursor::new(bump_bytes);
         let bump = Bump::deserialize(&mut cursor).unwrap();
