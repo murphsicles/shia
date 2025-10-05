@@ -37,3 +37,15 @@ pub enum ShiaError {
 
 /// Convenience type alias for Results.
 pub type Result<T> = std::result::Result<T, ShiaError>;
+
+impl From<anyhow::Error> for ShiaError {
+    fn from(err: anyhow::Error) -> Self {
+        ShiaError::Verification(err.to_string())
+    }
+}
+
+impl From<hex::FromHexError> for ShiaError {
+    fn from(err: hex::FromHexError) -> Self {
+        ShiaError::Verification(err.to_string())
+    }
+}
