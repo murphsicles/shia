@@ -4,12 +4,13 @@ use crate::atomic::validate_atomic;
 use crate::bump::Bump;
 use crate::client::BlockHeadersClient;
 use crate::errors::{Result, ShiaError};
-use crate::tx::{Output, Transaction};
+use crate::tx::{Input, Output, Transaction};
+use crate::utils::{read_varint, write_varint};
 use anyhow::anyhow;
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use hex;
 use std::collections::{HashMap, HashSet};
-use std::io::{Cursor, Read};
+use std::io::{Cursor, Read, Write};
 
 /// BEEF bundle: Transactions with ancestry and BUMP proofs.
 #[derive(Debug, Clone)]
@@ -54,22 +55,23 @@ impl Beef {
             return Err(ShiaError::InvalidVersion.into());
         }
 
-        let n_bumps = crate::utils::read_varint(&mut cursor)? as usize;
+        let n_bumps = read_varint(&mut cursor)? as usize;
         let mut bumps = Vec::with_capacity(n_bumps);
         for _ in 0..n_bumps {
             bumps.push(Bump::deserialize(&mut cursor)?);
         }
 
-        let n_txs = crate::utils::read_varint(&mut cursor)? as usize;
+        let n_txs = read_varint(&mut cursor)? as usize;
         let mut txs = Vec::with_capacity(n_txs);
         for _ in 0..n_txs {
-            let tx_start = cursor.position();
-            let tx = Transaction::from_raw(&bytes[tx_start as usize..])?;
-            let tx_len = tx.raw.len() as u64;
-            cursor.set_position(tx_start + tx_len);
+            let start_pos = cursor.position() as usize;
+            let remaining = &bytes[start_pos..];
+            let tx = Transaction::from_raw(remaining)?;
+            let tx_consumed = tx.raw.len();
+            cursor.set_position((start_pos + tx_consumed) as u64);
             let has_bump = cursor.read_u8()?;
             let bump_index = if has_bump == 0x01 {
-                Some(crate::utils::read_varint(&mut cursor)? as usize)
+                Some(read_varint(&mut cursor)? as usize)
             } else if has_bump == 0x00 {
                 None
             } else {
@@ -98,16 +100,16 @@ impl Beef {
             }
         }
         buf.write_u32::<LittleEndian>(4_022_206_465u32)?;
-        crate::utils::write_varint(&mut buf, self.bumps.len() as u64)?;
+        write_varint(&mut buf, self.bumps.len() as u64)?;
         for bump in &self.bumps {
             bump.serialize(&mut buf)?;
         }
-        crate::utils::write_varint(&mut buf, self.txs.len() as u64)?;
+        write_varint(&mut buf, self.txs.len() as u64)?;
         for (tx, bump_index) in &self.txs {
             buf.extend_from_slice(&tx.raw);
             if let Some(idx) = bump_index {
                 buf.write_u8(0x01)?;
-                crate::utils::write_varint(&mut buf, *idx as u64)?;
+                write_varint(&mut buf, *idx as u64)?;
             } else {
                 buf.write_u8(0x00)?;
             }
@@ -172,11 +174,12 @@ impl Beef {
         for &txid in &ordered {
             let tx = all_txs.remove(&txid).unwrap();
             let bump_index = bump_map.get(&txid).map(|bump| {
-                Some(*bump_indices.entry(txid).or_insert_with(|| {
+                let idx = *bump_indices.entry(txid).or_insert_with(|| {
                     let idx = bumps.len();
                     bumps.push(bump.clone());
                     idx
-                }))
+                });
+                Some(idx)
             });
             txs.push((tx, bump_index));
         }
