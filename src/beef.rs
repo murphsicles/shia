@@ -51,7 +51,7 @@ impl Beef {
         }
 
         let version = cursor.read_u32::<LittleEndian>()?;
-        if version != 4_022_206_465u32 {  // 0100BEEF LE
+        if version != 0xf1c6c3ef {  // BEEF0001 as per test hex
             return Err(ShiaError::InvalidVersion);
         }
 
@@ -99,7 +99,7 @@ impl Beef {
                 buf.extend_from_slice(&txid);
             }
         }
-        buf.write_u32::<LittleEndian>(4_022_206_465u32)?;
+        buf.write_u32::<LittleEndian>(0xf1c6c3ef)?;
         write_varint(&mut buf, self.bumps.len() as u64)?;
         for bump in &self.bumps {
             bump.serialize(&mut buf)?;
