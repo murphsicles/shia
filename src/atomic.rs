@@ -58,7 +58,6 @@ mod tests {
     use super::*;
     use crate::beef::Beef;
     use crate::tx::Transaction;
-    use std::collections::HashMap;
     use hex;
     
     #[test]
@@ -126,11 +125,12 @@ mod tests {
         
         // Construct a BEEF with two unrelated transactions
         let mut beef = Beef {
-            version: 1,
-            bump_map: HashMap::new(),
-            subject_txid: Some(tx1.txid()),
-            txs: vec![(tx1, vec![]), (tx2, vec![])],  // Extra unrelated transaction
+            is_atomic: true,
+            bumps: vec![(tx1, None), (tx2, None)],  // Fixed: using actual struct fields
         };
+        
+        // Manually set subject_txid since it's not in the struct initializer
+        beef.subject_txid = Some(tx1.txid());
         
         assert!(validate_atomic(&beef).is_err());
     }
@@ -150,12 +150,13 @@ mod tests {
         let tx = Transaction::from_raw(&coinbase_raw).expect("Parse failed");
         
         // Construct a minimal BEEF with just the coinbase transaction
-        let beef = Beef {
-            version: 1,
-            bump_map: HashMap::new(),
-            subject_txid: Some(tx.txid()),
-            txs: vec![(tx, vec![])],
+        let mut beef = Beef {
+            is_atomic: true,
+            bumps: vec![(tx, None)],  // Fixed: using actual struct fields
         };
+        
+        // Manually set subject_txid
+        beef.subject_txid = Some(beef.bumps[0].0.txid());
         
         // Should validate - coinbase has no ancestors to follow
         assert!(validate_atomic(&beef).is_ok());
