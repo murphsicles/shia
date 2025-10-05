@@ -3,10 +3,10 @@
 
 use crate::errors::{Result, ShiaError};
 use crate::utils::double_sha256;
+use byteorder::{LittleEndian, ReadBytesExt};
 use std::collections::HashMap;
 use std::io::{Cursor, Read};
 
-use byteorder::{LittleEndian, ReadBytesExt};
 use sv::messages::Tx as SvTx;
 use sv::script::{op_codes::OP_CODESEPARATOR, Script as SvScript, TransactionChecker, NO_FLAGS};
 use sv::transaction::sighash::SigHashCache;
@@ -155,7 +155,7 @@ mod tests {
         assert_eq!(tx.inputs[0].script_sig.len(), 77);
         assert_eq!(tx.inputs[0].sequence, 0xffffffff);
         assert_eq!(tx.outputs.len(), 1);
-        assert_eq!(tx.outputs[0].value, 50_000_000); // 00f2052a LE
+        assert_eq!(tx.outputs[0].value, 5_000_000_000u64);
         assert_eq!(tx.outputs[0].script_pubkey.len(), 67);
         assert_eq!(tx.locktime, 0);
 
