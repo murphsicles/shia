@@ -1,7 +1,5 @@
 //! Pluggable client for block headers and Merkle root validation.
 
-use crate::errors::Result;
-
 /// Trait for verifying Merkle roots against block headers.
 /// Implement for HTTP clients, local nodes, etc.
 pub trait BlockHeadersClient {
