@@ -38,7 +38,7 @@ mod tests {
         let tx_raw = hex::decode("01000000010000000000000000000000000000000000000000000000000000000000000000ffffffff0504ffff001dffffffff0100ca9a3b000000001976a914000000000000000000000000000000000000000088ac00000000").unwrap();
         let tx = Transaction::from_raw(&tx_raw).expect("Parse failed");
         let subject_txid = tx.txid();
-        let atomic_beef_hex = format!("01010101{}f1c6c3ef0001{}", hex::encode(&subject_txid), hex::encode(tx_raw));
+        let atomic_beef_hex = format!("01010101{}efbe00100001{}", hex::encode(&subject_txid), hex::encode(tx_raw));
         let beef = Beef::from_hex(&atomic_beef_hex).expect("Deserialize failed");
         assert!(validate_atomic(&beef).is_ok());
     }
@@ -48,7 +48,7 @@ mod tests {
         let tx_raw = hex::decode("01000000010000000000000000000000000000000000000000000000000000000000000000ffffffff0504ffff001dffffffff0100ca9a3b000000001976a914000000000000000000000000000000000000000088ac00000000").unwrap();
         let tx = Transaction::from_raw(&tx_raw).expect("Parse failed");
         let subject_txid = tx.txid();
-        let mut beef = Beef::from_hex(&format!("01010101{}f1c6c3ef0001{}", hex::encode(&subject_txid), hex::encode(tx_raw))).expect("Deserialize failed");
+        let mut beef = Beef::from_hex(&format!("01010101{}efbe00100001{}", hex::encode(&subject_txid), hex::encode(tx_raw))).expect("Deserialize failed");
         beef.subject_txid = Some([0u8; 32]);  // Tamper
         assert!(validate_atomic(&beef).is_err());
     }
