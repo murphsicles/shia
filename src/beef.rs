@@ -4,7 +4,7 @@ use crate::atomic::validate_atomic;
 use crate::bump::Bump;
 use crate::client::BlockHeadersClient;
 use crate::errors::{Result, ShiaError};
-use crate::tx::{Output, Transaction};
+use crate::tx::{Input, Output, Transaction};
 use crate::utils::{read_varint, write_varint};
 use anyhow::anyhow;
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
@@ -52,7 +52,7 @@ impl Beef {
 
         let version = cursor.read_u32::<LittleEndian>()?;
         if version != 4_022_206_465u32 {  // 0100BEEF LE
-            return Err(ShiaError::InvalidVersion.into());
+            return Err(ShiaError::InvalidVersion);
         }
 
         let n_bumps = read_varint(&mut cursor)? as usize;
@@ -206,7 +206,7 @@ impl Beef {
                 let bump = &self.bumps[*idx];
                 let root = bump.compute_merkle_root_for_hash(tx.merkle_hash())?;
                 if !headers_client.is_valid_root_for_height(root, bump.block_height) {
-                    return Err(ShiaError::Verification("Invalid Merkle root".to_string()).into());
+                    return Err(ShiaError::Verification("Invalid Merkle root".to_string()));
                 }
             }
         }
@@ -224,7 +224,7 @@ impl Beef {
             }
             let output_value = tx.outputs.iter().map(|o| o.value).sum::<u64>();
             if output_value > input_value {
-                return Err(ShiaError::Verification("Value mismatch (negative fee)".to_string()).into());
+                return Err(ShiaError::Verification("Value mismatch (negative fee)".to_string()));
             }
             tx.verify_scripts(&utxos)?;
 
