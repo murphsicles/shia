@@ -2,6 +2,8 @@
 
 use thiserror::Error;
 use std::io;
+use anyhow::Error as AnyhowError;
+use hex::FromHexError;
 
 /// Core error type for Shia operations.
 #[derive(Error, Debug)]
@@ -35,17 +37,17 @@ pub enum ShiaError {
     ScriptEval(String),
 }
 
+impl From<AnyhowError> for ShiaError {
+    fn from(err: AnyhowError) -> Self {
+        ShiaError::Verification(err.to_string())
+    }
+}
+
+impl From<FromHexError> for ShiaError {
+    fn from(err: FromHexError) -> Self {
+        ShiaError::Verification(err.to_string())
+    }
+}
+
 /// Convenience type alias for Results.
 pub type Result<T> = std::result::Result<T, ShiaError>;
-
-impl From<anyhow::Error> for ShiaError {
-    fn from(err: anyhow::Error) -> Self {
-        ShiaError::Verification(err.to_string())
-    }
-}
-
-impl From<hex::FromHexError> for ShiaError {
-    fn from(err: hex::FromHexError) -> Self {
-        ShiaError::Verification(err.to_string())
-    }
-}
