@@ -4,10 +4,10 @@ use crate::atomic::validate_atomic;
 use crate::bump::Bump;
 use crate::client::BlockHeadersClient;
 use crate::errors::{Result, ShiaError};
-use crate::tx::Transaction;
-use crate::utils::double_sha256;
+use crate::tx::{Output, Transaction};
 use anyhow::anyhow;
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
+use hex;
 use std::collections::{HashMap, HashSet};
 use std::io::{Cursor, Read};
 
@@ -172,11 +172,11 @@ impl Beef {
         for &txid in &ordered {
             let tx = all_txs.remove(&txid).unwrap();
             let bump_index = bump_map.get(&txid).map(|bump| {
-                *bump_indices.entry(txid).or_insert_with(|| {
+                Some(*bump_indices.entry(txid).or_insert_with(|| {
                     let idx = bumps.len();
                     bumps.push(bump.clone());
                     idx
-                })
+                }))
             });
             txs.push((tx, bump_index));
         }
