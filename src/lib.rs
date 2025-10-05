@@ -27,14 +27,14 @@ pub mod beef;
 pub mod bump;
 pub mod client;
 pub mod errors;
-pub mod transaction;
+pub mod tx;
 pub mod utils;
 
 /// Core BEEF struct for bundling and verification.
 pub use beef::Beef;
 
 /// BSV Transaction wrapper for parsing and script eval.
-pub use transaction::Transaction;
+pub use tx::Transaction;
 
 /// Pluggable trait for block headers/Merkle root checks.
 pub use client::BlockHeadersClient;
