@@ -565,7 +565,7 @@ mod tests {
     }
     
     #[test]
-fn transaction_verify_scripts() {
+    fn transaction_verify_scripts() {
     // Simple P2PKH from rust-sv tests
     let private_key = [1u8; 32];
     let secp = Secp256k1::new();
@@ -631,33 +631,6 @@ fn transaction_verify_scripts() {
 
     assert!(our_tx.verify_scripts(&prev_outputs).is_ok());
 }
-
-        let mut cache = SigHashCache::new();
-        let lock_script_bytes = &tx1.outputs[0].lock_script.0;
-        let sighash_type = sv::transaction::sighash::SIGHASH_ALL | sv::transaction::sighash::SIGHASH_FORKID;
-        let sig_hash = sv::transaction::sighash::sighash(&tx2, 0, lock_script_bytes, 10, sighash_type, &mut cache).unwrap();
-        let signature = sv::transaction::generate_signature(&private_key, &sig_hash, sighash_type).unwrap();
-
-        let mut unlock_script = SvScript::new();
-        unlock_script.append_data(&signature);
-        unlock_script.append_data(&pk_bytes);
-        tx2.inputs[0].unlock_script = unlock_script;
-
-        let mut tx2_bytes = Vec::new();
-        tx2.write(&mut tx2_bytes).unwrap();
-
-        let our_tx = Transaction::from_raw(&tx2_bytes).unwrap();
-        let prev_txid = our_tx.inputs[0].prev_txid;
-        let prev_vout = our_tx.inputs[0].vout;
-        let prev_output = Output {
-            value: 10,
-            script_pubkey: tx1.outputs[0].lock_script.0.clone(),
-        };
-        let mut prev_outputs = HashMap::new();
-        prev_outputs.insert((prev_txid, prev_vout), prev_output);
-
-        assert!(our_tx.verify_scripts(&prev_outputs).is_ok());
-    }
 
     #[test]
     fn bump_compute_merkle_root() {
