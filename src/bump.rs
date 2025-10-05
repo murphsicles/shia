@@ -49,7 +49,7 @@ impl Bump {
                 } else if flags == 1 {
                     None
                 } else {
-                    return Err(ShiaError::InvalidFlags(flags).into());
+                    return Err(ShiaError::InvalidFlags(flags));
                 };
                 leaves.push(Leaf { offset, flags, hash });
             }
@@ -99,7 +99,7 @@ impl Bump {
             let sibling_hash = match sibling_leaf.flags {
                 1 => working,  // Mirror
                 0 | 2 => sibling_leaf.hash.ok_or(anyhow!("Hash missing for non-duplicate"))?,
-                _ => return Err(ShiaError::InvalidFlags(sibling_leaf.flags).into()),
+                _ => return Err(ShiaError::InvalidFlags(sibling_leaf.flags)),
             };
             let concat = if current_offset % 2 == 0 {
                 [&working[..], &sibling_hash[..]].concat()
