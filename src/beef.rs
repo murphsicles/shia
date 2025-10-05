@@ -51,7 +51,7 @@ impl Beef {
         }
 
         let version = cursor.read_u32::<LittleEndian>()?;
-        if version != 0x0100BEEF {  // BEEF0001 little-endian
+        if version != 4022206465u32 {  // 0xf1c6c3ef LE
             return Err(ShiaError::InvalidVersion);
         }
 
@@ -99,7 +99,7 @@ impl Beef {
                 buf.extend_from_slice(&txid);
             }
         }
-        buf.write_u32::<LittleEndian>(0x0100BEEF)?;
+        buf.write_u32::<LittleEndian>(4022206465u32)?;
         write_varint(&mut buf, self.bumps.len() as u64)?;
         for bump in &self.bumps {
             bump.serialize(&mut buf)?;
@@ -262,7 +262,7 @@ mod tests {
 
     #[test]
     fn test_beef_from_hex_serialize() {
-        let minimal_beef_hex = "efbe001001010100000000000000000000000000000000000000000000000000000000000000000000000000000000000504ffff001dffffffff0100ca9a3b000000001976a914000000000000000000000000000000000000000088ac0000000000";
+        let minimal_beef_hex = "f1c6c3ef00010100000000000000000000000000000000000000000000000000000000000000000000000000000000000504ffff001dffffffff0100ca9a3b000000001976a914000000000000000000000000000000000000000088ac0000000000";
         let beef = Beef::from_hex(minimal_beef_hex).expect("Deserialize failed");
         let serialized = beef.serialize().expect("Serialize failed");
         let serialized_hex = hex::encode(serialized);
@@ -271,7 +271,7 @@ mod tests {
 
     #[test]
     fn test_beef_verify() {
-        let minimal_beef_hex = "efbe001001010100000000000000000000000000000000000000000000000000000000000000000000000000000000000504ffff001dffffffff0100ca9a3b000000001976a914000000000000000000000000000000000000000088ac0000000000";
+        let minimal_beef_hex = "f1c6c3ef00010100000000000000000000000000000000000000000000000000000000000000000000000000000000000504ffff001dffffffff0100ca9a3b000000001976a914000000000000000000000000000000000000000088ac0000000000";
         let beef = Beef::from_hex(minimal_beef_hex).expect("Deserialize failed");
         let mock_client = MockHeadersClient;
         assert!(beef.verify(&mock_client).is_ok());
