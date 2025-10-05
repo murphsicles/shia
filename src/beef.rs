@@ -4,13 +4,13 @@ use crate::atomic::validate_atomic;
 use crate::bump::Bump;
 use crate::client::BlockHeadersClient;
 use crate::errors::{Result, ShiaError};
-use crate::tx::{Input, Output, Transaction};
+use crate::tx::{Output, Transaction};
 use crate::utils::{read_varint, write_varint};
 use anyhow::anyhow;
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use hex;
 use std::collections::{HashMap, HashSet};
-use std::io::{Cursor, Read, Write};
+use std::io::{Cursor, Read};
 
 /// BEEF bundle: Transactions with ancestry and BUMP proofs.
 #[derive(Debug, Clone)]
@@ -174,12 +174,11 @@ impl Beef {
         for &txid in &ordered {
             let tx = all_txs.remove(&txid).unwrap();
             let bump_index = bump_map.get(&txid).map(|bump| {
-                let idx = *bump_indices.entry(txid).or_insert_with(|| {
+                *bump_indices.entry(txid).or_insert_with(|| {
                     let idx = bumps.len();
                     bumps.push(bump.clone());
                     idx
-                });
-                Some(idx)
+                })
             });
             txs.push((tx, bump_index));
         }
