@@ -82,11 +82,9 @@ impl Transaction {
         Ok(Self { version, inputs, outputs, locktime, raw: raw.to_vec() })
     }
 
-    /// Computes TXID (double SHA256 of raw, reversed to little-endian).
+    /// Computes TXID (double SHA256 of raw, big-endian).
     pub fn txid(&self) -> [u8; 32] {
-        let mut hash = double_sha256(&self.raw);
-        hash.reverse();
-        hash
+        double_sha256(&self.raw)
     }
 
     /// Computes Merkle leaf hash (double SHA256 of raw, big-endian).
