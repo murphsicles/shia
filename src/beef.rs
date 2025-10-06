@@ -1,5 +1,4 @@
 //! Core BEEF bundling, serialization, and verification (BRC-62).
-
 use crate::atomic::validate_atomic;
 use crate::bump::Bump;
 use crate::client::BlockHeadersClient;
@@ -11,7 +10,6 @@ use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use hex;
 use std::collections::{HashMap, HashSet};
 use std::io::{Cursor, Read};
-
 /// BEEF bundle: Transactions with ancestry and BUMP proofs.
 #[derive(Debug, Clone)]
 pub struct Beef {
@@ -24,14 +22,12 @@ pub struct Beef {
     /// Topo-sorted TXs with optional BUMP index.
     pub txs: Vec<(Transaction, Option<usize>)>,
 }
-
 impl Beef {
     /// Deserializes from hex string.
     pub fn from_hex(hex: &str) -> Result<Self> {
         let bytes = hex::decode(hex)?;
         Self::deserialize(&bytes)
     }
-
     /// Deserializes from bytes.
     /// Handles atomic prefix if present.
     /// # Errors
@@ -49,18 +45,15 @@ impl Beef {
         } else {
             cursor.set_position(0);
         }
-
         let version = cursor.read_u32::<LittleEndian>()?;
-        if version != 0xf1c6c3ef {  // 0xf1c6c3ef LE
+        if version != 0xf1c6c3ef { // 0xf1c6c3ef LE
             return Err(ShiaError::InvalidVersion);
         }
-
         let n_bumps = read_varint(&mut cursor)? as usize;
         let mut bumps = Vec::with_capacity(n_bumps);
         for _ in 0..n_bumps {
             bumps.push(Bump::deserialize(&mut cursor)?);
         }
-
         let n_txs = read_varint(&mut cursor)? as usize;
         let mut txs = Vec::with_capacity(n_txs);
         for _ in 0..n_txs {
@@ -79,16 +72,12 @@ impl Beef {
             };
             txs.push((tx, bump_index));
         }
-
         let beef = Self { is_atomic, subject_txid, bumps, txs };
-
         if beef.is_atomic {
             validate_atomic(&beef)?;
         }
-
         Ok(beef)
     }
-
     /// Serializes to bytes.
     /// Includes atomic prefix if enabled.
     pub fn serialize(&self) -> Result<Vec<u8>> {
@@ -116,7 +105,6 @@ impl Beef {
         }
         Ok(buf)
     }
-
     /// Builds BEEF from subject TX, ancestors, and BUMP map.
     /// Topo-sorts via Kahn's algorithm (parents first).
     /// # Errors
@@ -132,7 +120,6 @@ impl Beef {
         let mut all_txs = ancestors;
         let subject_txid = subject_tx.txid();
         all_txs.insert(subject_txid, subject_tx.clone());
-
         // Build graph and in-degrees
         let mut graph: HashMap<[u8; 32], HashSet<[u8; 32]>> = HashMap::new();
         let mut in_degree: HashMap<[u8; 32], u32> = HashMap::new();
@@ -146,7 +133,6 @@ impl Beef {
                 }
             }
         }
-
         // Kahn's topo sort
         let mut queue: Vec<_> = in_degree.iter().filter(|&(_, deg)| *deg == 0).map(|(&id, _)| id).collect();
         let mut ordered = Vec::new();
@@ -166,7 +152,6 @@ impl Beef {
         if ordered.len() != all_txs.len() {
             return Err(anyhow!("Cycle or missing dependencies in tx DAG").into());
         }
-
         // Collect ordered TXs with unique BUMPs
         let mut txs = Vec::new();
         let mut bumps = Vec::new();
@@ -182,20 +167,17 @@ impl Beef {
             });
             txs.push((tx, bump_index));
         }
-
         let beef = Self {
             is_atomic,
             subject_txid: if is_atomic { Some(subject_txid) } else { None },
             bumps,
             txs,
         };
-
         if beef.is_atomic {
             validate_atomic(&beef)?;
         }
         Ok(beef)
     }
-
     /// Full SPV verification: BUMPs, fees, scripts, atomic checks.
     /// # Args
     /// - `headers_client`: For Merkle root checks.
@@ -210,7 +192,6 @@ impl Beef {
                 }
             }
         }
-
         // Validate TX chain (UTXOs, fees, scripts)
         let mut utxos: HashMap<([u8; 32], u32), Output> = HashMap::new();
         for (tx, _) in &self.txs {
@@ -227,21 +208,17 @@ impl Beef {
                 return Err(ShiaError::Verification("Value mismatch (negative fee)".to_string()));
             }
             tx.verify_scripts(&utxos)?;
-
             // Update UTXOs
             let txid = tx.txid();
             for (i, out) in tx.outputs.iter().enumerate() {
                 utxos.insert((txid, i as u32), out.clone());
             }
         }
-
         if self.is_atomic {
             validate_atomic(self)?;
         }
-
         Ok(())
     }
-
     /// Wraps this BEEF in a Paymail envelope (BRC-70).
     #[cfg(feature = "paymail")]
     pub fn to_paymail_envelope(
@@ -252,31 +229,29 @@ impl Beef {
         crate::paymail::PaymailEnvelope::from_beef(self, proofs, metadata)
     }
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::client::MockHeadersClient;
     use hex;
     use std::collections::HashMap;
-
     #[test]
     fn test_beef_from_hex_serialize() {
-        let minimal_beef_hex = "efc3c6f100010100000000000000000000000000000000000000000000000000000000000000000000000000000000000504ffff001dffffffff0100ca9a3b000000001976a914000000000000000000000000000000000000000088ac0000000000";
-        let beef = Beef::from_hex(minimal_beef_hex).expect("Deserialize failed");
+        let tx_hex = "01000000010000000000000000000000000000000000000000000000000000000000000000ffffffff0504ffff001dffffffff0100ca9a3b000000001976a914000000000000000000000000000000000000000088ac00000000";
+        let minimal_beef_hex = format!("efc3c6f10001{}", tx_hex);
+        let beef = Beef::from_hex(&minimal_beef_hex).expect("Deserialize failed");
         let serialized = beef.serialize().expect("Serialize failed");
         let serialized_hex = hex::encode(serialized);
         assert_eq!(serialized_hex.to_lowercase(), minimal_beef_hex.to_lowercase());
     }
-
     #[test]
     fn test_beef_verify() {
-        let minimal_beef_hex = "efc3c6f100010100000000000000000000000000000000000000000000000000000000000000000000000000000000000504ffff001dffffffff0100ca9a3b000000001976a914000000000000000000000000000000000000000088ac0000000000";
-        let beef = Beef::from_hex(minimal_beef_hex).expect("Deserialize failed");
+        let tx_hex = "01000000010000000000000000000000000000000000000000000000000000000000000000ffffffff0504ffff001dffffffff0100ca9a3b000000001976a914000000000000000000000000000000000000000088ac00000000";
+        let minimal_beef_hex = format!("efc3c6f10001{}", tx_hex);
+        let beef = Beef::from_hex(&minimal_beef_hex).expect("Deserialize failed");
         let mock_client = MockHeadersClient;
         assert!(beef.verify(&mock_client).is_ok());
     }
-
     #[test]
     fn test_beef_build_simple() {
         let subject_raw = hex::decode("01000000010000000000000000000000000000000000000000000000000000000000000000ffffffff0504ffff001dffffffff0100ca9a3b000000001976a914000000000000000000000000000000000000000088ac00000000").unwrap();
@@ -284,12 +259,10 @@ mod tests {
         let ancestors = HashMap::new();
         let bump_map = HashMap::new();
         let beef = Beef::build(subject_tx.clone(), ancestors, bump_map, false).unwrap();
-
         assert_eq!(beef.txs.len(), 1);
         assert_eq!(beef.txs[0].0.version, subject_tx.version);
         assert_eq!(beef.bumps.len(), 0);
         assert!(beef.txs[0].1.is_none());
-
         let serialized = beef.serialize().unwrap();
         let deserialized = Beef::deserialize(&serialized).unwrap();
         assert_eq!(deserialized.txs[0].0.version, subject_tx.version);
