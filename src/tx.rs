@@ -95,14 +95,15 @@ impl Transaction {
     /// use std::collections::HashMap;
     /// use hex;
     ///
-    /// let tx_raw = hex::decode("01000000010000000000000000000000000000000000000000000000000000000000000000ffffffff0100ca9a3b00000000").unwrap();
+    /// let tx_hex = "01000000010000000000000000000000000000000000000000000000000000000000000000ffffffff0504ffff001dffffffff0100ca9a3b000000001976a914000000000000000000000000000000000000000088ac00000000";
+    /// let tx_raw = hex::decode(tx_hex).unwrap();
     /// let tx = Transaction::from_raw(&tx_raw).unwrap();
     /// let mut prev_outputs = HashMap::new();
-    /// let prev_txid = [0u8; 32]; // Example prev_txid
+    /// let prev_txid = [0u8; 32]; // Coinbase has no prev
     /// let prev_vout = 0u32;
     /// let prev_output = Output {
     ///     value: 1000,
-    ///     script_pubkey: vec![], // Example script_pubkey
+    ///     script_pubkey: vec![], // Not used for coinbase
     /// };
     /// prev_outputs.insert((prev_txid, prev_vout), prev_output);
     /// tx.verify_scripts(&prev_outputs).unwrap();
