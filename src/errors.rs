@@ -39,6 +39,9 @@ pub enum ShiaError {
     /// BUMP merge mismatch (heights, roots, or conflicting leaves).
     #[error("BUMP merge mismatch: {0}")]
     MergeMismatch(&'static str),
+    /// Parse error (e.g., extra bytes, invalid format).
+    #[error("Parse error: {0}")]
+    Parse(&'static str),
 }
 impl From<AnyhowError> for ShiaError {
     fn from(err: AnyhowError) -> Self {
