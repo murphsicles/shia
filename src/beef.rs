@@ -210,7 +210,9 @@ impl Beef {
             if !is_coinbase && output_value > input_value {
                 return Err(ShiaError::Verification("Value mismatch (negative fee)".to_string()));
             }
-            tx.verify_scripts(&utxos)?;
+            if !is_coinbase {
+                tx.verify_scripts(&utxos)?;
+            }
             // Update UTXOs
             let txid = tx.txid();
             for (i, out) in tx.outputs.iter().enumerate() {
