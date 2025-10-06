@@ -1,6 +1,5 @@
 //! Atomic BEEF validation: Subject TX + direct ancestors only (BRC-95).
 use crate::beef::Beef;
-use crate::bump::Bump;  // Add this for Vec<Bump> in tests
 use crate::errors::{Result, ShiaError};
 use std::collections::{HashSet, HashMap};
 use anyhow::anyhow;
