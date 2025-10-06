@@ -238,7 +238,7 @@ mod tests {
     #[test]
     fn test_beef_from_hex_serialize() {
         let tx_hex = "01000000010000000000000000000000000000000000000000000000000000000000000000ffffffff0504ffff001dffffffff0100ca9a3b000000001976a914000000000000000000000000000000000000000088ac00000000";
-        let minimal_beef_hex = format!("efc3c6f10001{}", tx_hex);
+        let minimal_beef_hex = format!("efc3c6f10001{}00", tx_hex);
         let beef = Beef::from_hex(&minimal_beef_hex).expect("Deserialize failed");
         let serialized = beef.serialize().expect("Serialize failed");
         let serialized_hex = hex::encode(serialized);
@@ -247,7 +247,7 @@ mod tests {
     #[test]
     fn test_beef_verify() {
         let tx_hex = "01000000010000000000000000000000000000000000000000000000000000000000000000ffffffff0504ffff001dffffffff0100ca9a3b000000001976a914000000000000000000000000000000000000000088ac00000000";
-        let minimal_beef_hex = format!("efc3c6f10001{}", tx_hex);
+        let minimal_beef_hex = format!("efc3c6f10001{}00", tx_hex);
         let beef = Beef::from_hex(&minimal_beef_hex).expect("Deserialize failed");
         let mock_client = MockHeadersClient;
         assert!(beef.verify(&mock_client).is_ok());
