@@ -73,9 +73,9 @@ mod tests {
         let subject_txid = tx.txid();
        
         let atomic_beef_hex = format!(
-            "01010101{}f1c6c3ef0001{}",
+            "01010101{}efc3c6f10001{}00",
             hex::encode(&subject_txid),
-            hex::encode(tx_raw)
+            hex::encode(&tx_raw)
         );
        
         let beef = Beef::from_hex(&atomic_beef_hex).expect("Deserialize failed");
@@ -95,9 +95,9 @@ mod tests {
         let subject_txid = tx.txid();
        
         let mut beef = Beef::from_hex(&format!(
-            "01010101{}f1c6c3ef0001{}",
+            "01010101{}efc3c6f10001{}00",
             hex::encode(&subject_txid),
-            hex::encode(tx_raw)
+            hex::encode(&tx_raw)
         )).expect("Deserialize failed");
        
         // Set subject to non-existent transaction
