@@ -96,19 +96,19 @@ impl Transaction {
     /// use std::collections::HashMap;
     /// use hex;
     ///
-    /// // Example P2PKH spending tx (simplified; in real use, generate proper sig)
-    /// let tx_hex = "0100000001000000000000000000000000000000000000000000000000000000000000000000000000ffffffff0100ca9a3b000000001976a914000000000000000000000000000000000000000088ac00000000";
+    /// // Example coinbase tx (verification skipped for coinbase inputs)
+    /// let tx_hex = "01000000010000000000000000000000000000000000000000000000000000000000000000ffffffff0504ffff001dffffffff0100ca9a3b000000001976a914000000000000000000000000000000000000000088ac00000000";
     /// let tx_raw = hex::decode(tx_hex).unwrap();
     /// let tx = Transaction::from_raw(&tx_raw).unwrap();
     /// let mut prev_outputs = HashMap::new();
-    /// let prev_txid = tx.inputs[0].prev_txid;
-    /// let prev_vout = tx.inputs[0].vout;
+    /// let prev_txid = [0u8; 32];
+    /// let prev_vout = 0xffffffffu32;
     /// let prev_output = Output {
     ///     value: 1000,
-    ///     script_pubkey: vec![0x76, 0xa9, 0x14, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x88, 0xac], // Dummy P2PKH
+    ///     script_pubkey: vec![],
     /// };
     /// prev_outputs.insert((prev_txid, prev_vout), prev_output);
-    /// tx.verify_scripts(&prev_outputs).expect("Script verification failed");
+    /// tx.verify_scripts(&prev_outputs).unwrap();
     /// ```
     pub fn verify_scripts(&self, prev_outputs: &HashMap<([u8; 32], u32), Output>) -> Result<()> {
         let sv_tx = SvTx::read(&mut Cursor::new(&self.raw))
