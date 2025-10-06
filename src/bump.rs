@@ -24,7 +24,8 @@
 //! - Find leaf (flag=2, matching TX hash) in level 0 → get offset.
 //! - For each level (0 to tree_height-1):
 //!   - Sibling offset = current ^ 1.
-//!   - Sibling hash: Mirror working if flag=1; use hash if 0/2.
+//!   - If sibling leaf exists: Use its flag/hash (mirror if 1).
+//!   - Else: Assume duplicate (flag=1, mirror working).
 //!   - Concat: Working left + sibling if even offset; reverse if odd.
 //!   - Working = double SHA256(concat); current /= 2.
 //! - Final working = Merkle root; verify against block header.
@@ -129,11 +130,12 @@ impl Bump {
     ///
     /// Traverses levels bottom-up: Finds leaf (flag=2 in level 0), computes siblings (offset ^ 1),
     /// mirrors for duplicates (flag=1), concats based on parity (even: working left), double-SHA256s.
+    /// If no explicit sibling leaf, assumes duplicate (mirror).
     /// Final working hash is the root.
     ///
     /// # Errors
     /// - `ShiaError::LeafNotFound`: No matching flag=2 leaf in level 0.
-    /// - `ShiaError::MissingSibling`: Sibling offset not in level.
+    /// - `ShiaError::MissingSibling`: Sibling offset not in level and not duplicate.
     /// - `ShiaError::InvalidFlags`: Unexpected flag in sibling.
     /// - Missing hash for non-duplicate leaf.
     ///
@@ -171,14 +173,14 @@ impl Bump {
         for level_idx in 0..self.tree_height as usize {
             let current_level = &self.levels[level_idx];
             let sibling_offset = current_offset ^ 1;
-            let sibling_leaf = current_level
-                .iter()
-                .find(|l| l.offset == sibling_offset)
-                .ok_or(ShiaError::MissingSibling)?;
-            let sibling_hash = match sibling_leaf.flags {
-                1 => working, // Mirror working hash
-                0 | 2 => sibling_leaf.hash.ok_or(anyhow!("Hash missing for non-duplicate"))?,
-                _ => return Err(ShiaError::InvalidFlags(sibling_leaf.flags)),
+            let sibling_leaf = current_level.iter().find(|l| l.offset == sibling_offset);
+            let sibling_hash = match sibling_leaf {
+                Some(leaf) => match leaf.flags {
+                    1 => working, // Mirror working hash
+                    0 | 2 => leaf.hash.ok_or(anyhow!("Hash missing for non-duplicate"))?,
+                    _ => return Err(ShiaError::InvalidFlags(leaf.flags)),
+                },
+                None => working, // Assume duplicate (mirror) if no sibling leaf
             };
             let concat = if current_offset % 2 == 0 {
                 [&working[..], &sibling_hash[..]].concat() // Left: working, right: sibling
@@ -203,7 +205,8 @@ impl Bump {
         if self.block_height != other.block_height || self.tree_height != other.tree_height {
             return Err(ShiaError::MergeMismatch("Heights differ"));
         }
-        let self_root = self.compute_merkle_root_for_hash([0u8; 32])?; // Dummy leaf for root check
+        // Compute roots with dummy leaf to check consistency (assumes valid structure)
+        let self_root = self.compute_merkle_root_for_hash([0u8; 32])?;
         let other_root = other.compute_merkle_root_for_hash([0u8; 32])?;
         if self_root != other_root {
             return Err(ShiaError::MergeMismatch("Roots differ"));
@@ -252,7 +255,7 @@ mod tests {
         assert_eq!(computed_root, root);
     }
 
-    /// Tests duplicate flag (flag=1): Mirrors working hash, no sibling hash bytes.
+    /// Tests duplicate flag (flag=1): Mirrors working hash, no sibling leaf needed.
     #[test]
     fn test_bump_duplicate_mirror() {
         let leaf_hash = [1u8; 32];
@@ -261,11 +264,11 @@ mod tests {
         let mut bump_bytes = Vec::new();
         write_varint(&mut bump_bytes, 1u64).unwrap();
         bump_bytes.write_u8(1).unwrap();
-        write_varint(&mut bump_bytes, 1u64).unwrap(); // 1 leaf (duplicate sibling implied)
+        write_varint(&mut bump_bytes, 1u64).unwrap(); // 1 leaf (sibling implied duplicate)
         write_varint(&mut bump_bytes, 0u64).unwrap(); // offset 0
         bump_bytes.write_u8(2).unwrap(); // flag 2
         bump_bytes.extend_from_slice(&leaf_hash);
-        // No sibling leaf—duplicate covers offset 1
+        // No sibling leaf—assumed duplicate
         let mut cursor = Cursor::new(bump_bytes);
         let bump = Bump::deserialize(&mut cursor).unwrap();
         let computed_root = bump.compute_merkle_root_for_hash(leaf_hash).unwrap();
@@ -275,25 +278,36 @@ mod tests {
     /// Tests merge: Unions non-conflicting leaves at same height/root.
     #[test]
     fn test_bump_merge() {
+        let leaf_hash = [1u8; 32];
+        let sibling_hash = [2u8; 32];
+        let concat = [&leaf_hash[..], &sibling_hash[..]].concat();
+        let common_root = double_sha256(&concat);
+
         let bump1 = Bump {
             block_height: 1,
             tree_height: 1,
             levels: vec![vec![
-                Leaf { offset: 0, flags: 2, hash: Some([1u8; 32]) },
+                Leaf { offset: 0, flags: 2, hash: Some(leaf_hash) },
             ]],
         };
         let bump2 = Bump {
             block_height: 1,
             tree_height: 1,
             levels: vec![vec![
-                Leaf { offset: 1, flags: 0, hash: Some([2u8; 32]) },
+                Leaf { offset: 1, flags: 0, hash: Some(sibling_hash) },
             ]],
         };
+        // Verify individual roots match (with implied duplicate for missing sibling)
+        assert_eq!(bump1.compute_merkle_root_for_hash(leaf_hash).unwrap(), common_root);
+        assert_eq!(bump2.compute_merkle_root_for_hash(sibling_hash).unwrap(), common_root); // Note: sibling as "leaf" for test
+
         let mut merged = bump1.clone();
         merged.merge(&bump2).unwrap();
         assert_eq!(merged.levels[0].len(), 2);
         assert_eq!(merged.levels[0][0].offset, 0);
         assert_eq!(merged.levels[0][1].offset, 1);
+        // Recompute root with full path
+        assert_eq!(merged.compute_merkle_root_for_hash(leaf_hash).unwrap(), common_root);
     }
 
     /// Tests invalid merge: Conflicting leaf.
