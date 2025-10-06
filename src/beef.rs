@@ -196,15 +196,18 @@ impl Beef {
         let mut utxos: HashMap<([u8; 32], u32), Output> = HashMap::new();
         for (tx, _) in &self.txs {
             let mut input_value = 0u64;
+            let is_coinbase = tx.inputs.iter().any(|input| input.prev_txid == [0u8; 32]);
             for input in &tx.inputs {
-                let key = (input.prev_txid, input.vout);
-                let prev_out = utxos.get(&key)
-                    .ok_or_else(|| ShiaError::Verification("Missing UTXO".to_string()))?
-                    .clone();
-                input_value += prev_out.value;
+                if input.prev_txid != [0u8; 32] {
+                    let key = (input.prev_txid, input.vout);
+                    let prev_out = utxos.get(&key)
+                        .ok_or_else(|| ShiaError::Verification("Missing UTXO".to_string()))?
+                        .clone();
+                    input_value += prev_out.value;
+                }
             }
             let output_value = tx.outputs.iter().map(|o| o.value).sum::<u64>();
-            if output_value > input_value {
+            if !is_coinbase && output_value > input_value {
                 return Err(ShiaError::Verification("Value mismatch (negative fee)".to_string()));
             }
             tx.verify_scripts(&utxos)?;
