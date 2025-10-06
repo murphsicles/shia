@@ -1,17 +1,14 @@
 //! BSV Transaction structures and parsing.
 //! Compatible with `sv` crate for script evaluation.
-
 use crate::errors::{Result, ShiaError};
 use crate::utils::double_sha256;
 use byteorder::{LittleEndian, ReadBytesExt};
 use std::collections::HashMap;
 use std::io::{Cursor, Read};
-
 use sv::messages::Tx as SvTx;
 use sv::script::{op_codes::OP_CODESEPARATOR, Script as SvScript, TransactionChecker, NO_FLAGS};
 use sv::transaction::sighash::SigHashCache;
 use sv::util::Serializable;
-
 /// Input for a transaction.
 #[derive(Clone, Debug)]
 pub struct Input {
@@ -24,7 +21,6 @@ pub struct Input {
     /// Sequence number.
     pub sequence: u32,
 }
-
 /// Output for a transaction.
 #[derive(Clone, Debug)]
 pub struct Output {
@@ -33,7 +29,6 @@ pub struct Output {
     /// ScriptPubkey (lock script).
     pub script_pubkey: Vec<u8>,
 }
-
 /// BSV Transaction wrapper: parses raw bytes, computes hashes, verifies scripts.
 #[derive(Clone, Debug)]
 pub struct Transaction {
@@ -48,7 +43,6 @@ pub struct Transaction {
     /// Raw serialized bytes.
     pub raw: Vec<u8>,
 }
-
 impl Transaction {
     /// Parses a raw transaction from bytes (BSV format).
     /// # Errors
@@ -82,17 +76,14 @@ impl Transaction {
         let consumed = local_cursor.position() as usize;
         Ok(Self { version, inputs, outputs, locktime, raw: raw[0..consumed].to_vec() })
     }
-
     /// Computes TXID (double SHA256 of raw, big-endian).
     pub fn txid(&self) -> [u8; 32] {
         double_sha256(&self.raw)
     }
-
     /// Computes Merkle leaf hash (double SHA256 of raw, big-endian).
     pub fn merkle_hash(&self) -> [u8; 32] {
         double_sha256(&self.raw)
     }
-
     /// Validates all input scripts against provided previous outputs/UTXOs.
     /// Uses `sv` crate for full BSV script execution (supports P2PKH, multisig, etc.).
     /// # Errors
@@ -100,9 +91,19 @@ impl Transaction {
     /// - [ShiaError::Verification] if UTXO missing.
     /// # Example
     /// ```
-    /// let mut utxos = HashMap::new();
-    /// // Populate utxos with (prev_txid, vout) -> Output
-    /// tx.verify_scripts(&utxos)?;
+    /// use shia::tx::{Transaction, Output};
+    /// use std::collections::HashMap;
+    ///
+    /// let tx = Transaction::from_raw(b"dummy raw tx bytes").unwrap(); // Replace with actual raw
+    /// let mut prev_outputs = HashMap::new();
+    /// let prev_txid = [0u8; 32]; // Example prev_txid
+    /// let prev_vout = 0u32;
+    /// let prev_output = Output {
+    ///     value: 1000,
+    ///     script_pubkey: vec![], // Example script_pubkey
+    /// };
+    /// prev_outputs.insert((prev_txid, prev_vout), prev_output);
+    /// tx.verify_scripts(&prev_outputs).unwrap();
     /// ```
     pub fn verify_scripts(&self, prev_outputs: &HashMap<([u8; 32], u32), Output>) -> Result<()> {
         let sv_tx = SvTx::read(&mut Cursor::new(&self.raw))
@@ -134,19 +135,16 @@ impl Transaction {
         Ok(())
     }
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use hex_literal::hex;
     use std::collections::HashMap;
-
     #[test]
     fn test_transaction_from_raw() {
         // Genesis coinbase tx hex
         let raw = hex!("01000000010000000000000000000000000000000000000000000000000000000000000000ffffffff4d04ffff001d0104455468652054696d65732030332f4a616e2f32303039204368616e63656c6c6f72206f6e206272696e6b206f66207365636f6e64206261696c6f757420666f722062616e6b73ffffffff0100f2052a01000000434104678afdb0fe5548271967f1a67130b7105cd6a828e03909a67962e0ea1f61deb649f6bc3f4cef38c4f35504e51ec112de5c384df7ba0b8d578a4c702b6bf11d5fac00000000");
         let tx = Transaction::from_raw(&raw).unwrap();
-
         assert_eq!(tx.version, 1);
         assert_eq!(tx.inputs.len(), 1);
         assert_eq!(tx.inputs[0].prev_txid, [0u8; 32]);
@@ -154,14 +152,12 @@ mod tests {
         assert_eq!(tx.inputs[0].script_sig.len(), 77);
         assert_eq!(tx.inputs[0].sequence, 0xffffffff);
         assert_eq!(tx.outputs.len(), 1);
-        assert_eq!(tx.outputs[0].value, 5_000_000_000u64);  // 50 BTC = 5 billion sats
+        assert_eq!(tx.outputs[0].value, 5_000_000_000u64); // 50 BTC = 5 billion sats
         assert_eq!(tx.outputs[0].script_pubkey.len(), 67);
         assert_eq!(tx.locktime, 0);
-
         let expected_txid = hex!("3ba3edfd7a7b12b27ac72c3e67768f617fc81bc3888a51323a9fb8aa4b1e5e4a");
         assert_eq!(tx.txid(), expected_txid);
     }
-
     #[test]
     fn transaction_verify_scripts() {
         use secp256k1::{Secp256k1, SecretKey, PublicKey};
@@ -169,7 +165,6 @@ mod tests {
         use sv::script::Script as SvScript;
         use sv::util::{Hash256 as SvHash256, hash160};
         use sv::transaction::sighash::{SIGHASH_ALL, SIGHASH_FORKID};
-
         // Simple P2PKH from rust-sv tests
         let private_key = [1u8; 32];
         let secp = Secp256k1::new();
@@ -177,14 +172,12 @@ mod tests {
         let public_key = PublicKey::from_secret_key(&secp, &secret_key);
         let pk_bytes = public_key.serialize();
         let pkh = hash160(&pk_bytes);
-
         let mut lock_script = SvScript::new();
         lock_script.append(sv::script::op_codes::OP_DUP);
         lock_script.append(sv::script::op_codes::OP_HASH160);
         lock_script.append_data(&pkh.0);
         lock_script.append(sv::script::op_codes::OP_EQUALVERIFY);
         lock_script.append(sv::script::op_codes::OP_CHECKSIG);
-
         let tx1 = SvTx {
             version: 1,
             inputs: vec![],
@@ -194,7 +187,6 @@ mod tests {
             }],
             lock_time: 0,
         };
-
         let mut tx2 = SvTx {
             version: 1,
             inputs: vec![SvTxIn {
@@ -208,21 +200,17 @@ mod tests {
             outputs: vec![],
             lock_time: 0,
         };
-
         let mut cache = SigHashCache::new();
         let lock_script_bytes = &tx1.outputs[0].lock_script.0;
         let sighash_type = SIGHASH_ALL | SIGHASH_FORKID;
         let sig_hash = sv::transaction::sighash::sighash(&tx2, 0, lock_script_bytes, 10, sighash_type, &mut cache).unwrap();
         let signature = sv::transaction::generate_signature(&private_key, &sig_hash, sighash_type).unwrap();
-
         let mut unlock_script = SvScript::new();
         unlock_script.append_data(&signature);
         unlock_script.append_data(&pk_bytes);
         tx2.inputs[0].unlock_script = unlock_script;
-
         let mut tx2_bytes = Vec::new();
         tx2.write(&mut tx2_bytes).unwrap();
-
         let our_tx = Transaction::from_raw(&tx2_bytes).unwrap();
         let prev_txid = our_tx.inputs[0].prev_txid;
         let prev_vout = our_tx.inputs[0].vout;
@@ -232,7 +220,6 @@ mod tests {
         };
         let mut prev_outputs = HashMap::new();
         prev_outputs.insert((prev_txid, prev_vout), prev_output);
-
         assert!(our_tx.verify_scripts(&prev_outputs).is_ok());
     }
 }
