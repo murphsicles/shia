@@ -93,8 +93,10 @@ impl Transaction {
     /// ```
     /// use shia::tx::{Transaction, Output};
     /// use std::collections::HashMap;
+    /// use hex;
     ///
-    /// let tx = Transaction::from_raw(b"dummy raw tx bytes").unwrap(); // Replace with actual raw
+    /// let tx_raw = hex::decode("01000000010000000000000000000000000000000000000000000000000000000000000000ffffffff0100ca9a3b00000000").unwrap();
+    /// let tx = Transaction::from_raw(&tx_raw).unwrap();
     /// let mut prev_outputs = HashMap::new();
     /// let prev_txid = [0u8; 32]; // Example prev_txid
     /// let prev_vout = 0u32;
