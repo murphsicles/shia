@@ -124,7 +124,7 @@ mod tests {
         let tx2 = Transaction::from_raw(&tx2_raw).expect("Parse failed");
        
         // Construct a BEEF with two unrelated transactions
-        let mut beef = Beef {
+        let beef = Beef {
             subject_txid: Some(tx1.txid()),  // Fixed: include required field
             txs: vec![(tx1, None), (tx2, None)],  // Fixed: use txs for (tx, proof) tuples
             bumps: vec![],  // Fixed: empty Vec<Bump> (no proofs needed for this test)
@@ -149,7 +149,7 @@ mod tests {
         let tx = Transaction::from_raw(&coinbase_raw).expect("Parse failed");
        
         // Construct a minimal BEEF with just the coinbase transaction
-        let mut beef = Beef {
+        let beef = Beef {
             subject_txid: Some(tx.txid()),  // Fixed: include required field
             txs: vec![(tx, None)],  // Fixed: use txs for (tx, proof) tuples
             bumps: vec![],  // Fixed: empty Vec<Bump> (no proofs needed for this test)
