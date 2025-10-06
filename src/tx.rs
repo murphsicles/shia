@@ -1,5 +1,38 @@
 //! BSV Transaction structures and parsing.
-//! Compatible with `sv` crate for script evaluation.
+//! Compatible with `sv` crate for script evaluation (BRC-12).
+//!
+//! Parses raw BSV transactions (version, inputs/outputs, locktime), computes TXID/Merkle hashes,
+//! and verifies input scripts against UTXOs using full BSV execution. Supports coinbase skips.
+//! Raw format: LE for fixed fields, VarInt for counts/scripts, double SHA for hashes.
+//!
+//! ## Structure (Raw Format, BRC-12)
+//!
+//! - **Version**: u32 LE (4 bytes).
+//! - **nInputs**: VarInt (1-9 bytes).
+//! - **Inputs** (for each):
+//!   - **PrevTXID**: [u8; 32] LE (32 bytes).
+//!   - **vout**: u32 LE (4 bytes).
+//!   - **ScriptSig Len**: VarInt (1-9 bytes).
+//!   - **ScriptSig**: Bytes (variable).
+//!   - **Sequence**: u32 LE (4 bytes).
+//! - **nOutputs**: VarInt (1-9 bytes).
+//! - **Outputs** (for each):
+//!   - **Value**: u64 LE (8 bytes).
+//!   - **ScriptPubkey Len**: VarInt (1-9 bytes).
+//!   - **ScriptPubkey**: Bytes (variable).
+//! - **Locktime**: u32 LE (4 bytes).
+//!
+//! TXID: double SHA256(raw), reversed bytes for display/hex.
+//! Merkle Leaf: double SHA256(raw) (unreversed hash).
+//!
+//! ## Verification
+//!
+//! - **Scripts**: Concat sig + pubkey, eval with `sv` (P2PKH, multisig); skips coinbase.
+//! - **UTXOs**: Matches inputs to prior outputs; value sum for fees.
+//!
+//! ## Examples
+//!
+//! See `Transaction::from_raw` and `verify_scripts` for code.
 use crate::errors::{Result, ShiaError};
 use crate::utils::double_sha256;
 use byteorder::{LittleEndian, ReadBytesExt};
@@ -9,44 +42,71 @@ use sv::messages::Tx as SvTx;
 use sv::script::{op_codes::OP_CODESEPARATOR, Script as SvScript, TransactionChecker, NO_FLAGS};
 use sv::transaction::sighash::SigHashCache;
 use sv::util::Serializable;
+
 /// Input for a transaction.
+///
+/// Previous output reference + unlock script for spending.
 #[derive(Clone, Debug)]
 pub struct Input {
-    /// Previous TXID (little-endian).
+    /// Previous TXID (stored little-endian for raw compatibility).
     pub prev_txid: [u8; 32],
-    /// Output index.
+    /// Output index from prev tx.
     pub vout: u32,
-    /// ScriptSig (unlock script).
+    /// ScriptSig (unlock script): Bytes to satisfy pubkey.
     pub script_sig: Vec<u8>,
-    /// Sequence number.
+    /// Sequence number: For relative timelocks/RBF.
     pub sequence: u32,
 }
+
 /// Output for a transaction.
+///
+/// Value + locking script for spending conditions.
 #[derive(Clone, Debug)]
 pub struct Output {
-    /// Value in satoshis.
+    /// Value in satoshis (u64 LE in raw).
     pub value: u64,
-    /// ScriptPubkey (lock script).
+    /// ScriptPubkey (lock script): Conditions to spend (e.g., P2PKH).
     pub script_pubkey: Vec<u8>,
 }
+
 /// BSV Transaction wrapper: parses raw bytes, computes hashes, verifies scripts.
+///
+/// Stores parsed fields + raw for re-serialization/hashes. Compatible with `sv` for advanced eval.
 #[derive(Clone, Debug)]
 pub struct Transaction {
-    /// Version number.
+    /// Version number (u32 LE).
     pub version: u32,
-    /// Inputs.
+    /// Inputs: Spends from prior outputs.
     pub inputs: Vec<Input>,
-    /// Outputs.
+    /// Outputs: Creates new UTXOs.
     pub outputs: Vec<Output>,
-    /// Locktime.
+    /// Locktime: Min block/time for validity.
     pub locktime: u32,
-    /// Raw serialized bytes.
+    /// Raw serialized bytes (for hashes/re-use).
     pub raw: Vec<u8>,
 }
+
 impl Transaction {
     /// Parses a raw transaction from bytes (BSV format).
+    ///
+    /// Reads LE fields, VarInts for counts/scripts; reverses prev_txid to LE storage.
+    /// Truncates raw to consumed bytes (ignores trailing).
+    ///
     /// # Errors
-    /// - IO or VarInt errors during deserialization.
+    /// - IO failures (short reads).
+    /// - Invalid VarInt (via utils::read_varint).
+    /// - Parse extras (consumed != len).
+    ///
+    /// # Example
+    /// ```
+    /// use shia::tx::Transaction;
+    /// use hex_literal::hex;
+    ///
+    /// let raw = hex!("01000000010000000000000000000000000000000000000000000000000000000000000000ffffffff0504ffff001dffffffff0100ca9a3b000000001976a914000000000000000000000000000000000000000088ac00000000");
+    /// let tx = Transaction::from_raw(&raw).unwrap();
+    /// assert_eq!(tx.version, 1);
+    /// assert_eq!(tx.inputs.len(), 1);
+    /// ```
     pub fn from_raw(raw: &[u8]) -> Result<Self> {
         let mut local_cursor = Cursor::new(raw);
         let version = local_cursor.read_u32::<LittleEndian>()?;
@@ -55,7 +115,7 @@ impl Transaction {
         for _ in 0..num_inputs {
             let mut prev_txid = [0u8; 32];
             local_cursor.read_exact(&mut prev_txid)?;
-            prev_txid.reverse(); // To little-endian TXID
+            prev_txid.reverse(); // To little-endian TXID (BSV raw is LE)
             let vout = local_cursor.read_u32::<LittleEndian>()?;
             let script_len = crate::utils::read_varint(&mut local_cursor)? as usize;
             let mut script_sig = vec![0u8; script_len];
@@ -74,22 +134,48 @@ impl Transaction {
         }
         let locktime = local_cursor.read_u32::<LittleEndian>()?;
         let consumed = local_cursor.position() as usize;
-        Ok(Self { version, inputs, outputs, locktime, raw: raw[0..consumed].to_vec() })
+        if consumed != raw.len() {
+            return Err(ShiaError::Parse("Extra bytes after transaction"));
+        }
+        Ok(Self { version, inputs, outputs, locktime, raw: raw.to_vec() })
     }
-    /// Computes TXID (double SHA256 of raw, big-endian).
+
+    /// Computes TXID (double SHA256 of raw, big-endian display).
+    ///
+    /// Returns the reversed hash (standard TXID hex format).
+    /// # Example
+    /// ```
+    /// use shia::tx::Transaction;
+    /// use hex_literal::hex;
+    ///
+    /// let raw = hex!("01000000010000000000000000000000000000000000000000000000000000000000000000ffffffff0504ffff001dffffffff0100ca9a3b000000001976a914000000000000000000000000000000000000000088ac00000000");
+    /// let tx = Transaction::from_raw(&raw).unwrap();
+    /// let txid = tx.txid();
+    /// assert_eq!(txid, hex!("3ba3edfd7a7b12b27ac72c3e67768f617fc81bc3888a51323a9fb8aa4b1e5e4a"));
+    /// ```
     pub fn txid(&self) -> [u8; 32] {
-        double_sha256(&self.raw)
+        let mut hash = double_sha256(&self.raw);
+        hash.reverse(); // Reversed for TXID display
+        hash
     }
-    /// Computes Merkle leaf hash (double SHA256 of raw, big-endian).
+
+    /// Computes Merkle leaf hash (double SHA256 of raw, unreversed).
+    ///
+    /// Used for Merkle tree leaves (BUMP proofs); not reversed.
     pub fn merkle_hash(&self) -> [u8; 32] {
         double_sha256(&self.raw)
     }
+
     /// Validates all input scripts against provided previous outputs/UTXOs.
+    ///
     /// Uses `sv` crate for full BSV script execution (supports P2PKH, multisig, etc.).
-    /// Skips coinbase inputs.
+    /// Skips coinbase inputs (prev_txid all zeros).
+    /// Concat sig + pubkey for eval; requires sighash forkid=false for legacy.
+    ///
     /// # Errors
-    /// - [ShiaError::ScriptEval] if any script fails.
-    /// - [ShiaError::Verification] if UTXO missing.
+    /// - `ShiaError::ScriptEval`: Eval failure (e.g., invalid sig).
+    /// - `ShiaError::Verification`: Missing UTXO.
+    ///
     /// # Example
     /// ```
     /// use shia::tx::{Transaction, Output};
@@ -143,11 +229,13 @@ impl Transaction {
         Ok(())
     }
 }
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use hex_literal::hex;
     use std::collections::HashMap;
+
     #[test]
     fn test_transaction_from_raw() {
         // Genesis coinbase tx hex
@@ -166,6 +254,7 @@ mod tests {
         let expected_txid = hex!("3ba3edfd7a7b12b27ac72c3e67768f617fc81bc3888a51323a9fb8aa4b1e5e4a");
         assert_eq!(tx.txid(), expected_txid);
     }
+    
     #[test]
     fn transaction_verify_scripts() {
         use secp256k1::{Secp256k1, SecretKey, PublicKey};
@@ -187,26 +276,26 @@ mod tests {
         lock_script.append(sv::script::op_codes::OP_EQUALVERIFY);
         lock_script.append(sv::script::op_codes::OP_CHECKSIG);
         let tx1 = SvTx {
-            version: 1,
-            inputs: vec![],
-            outputs: vec![SvTxOut {
-                satoshis: 10,
-                lock_script,
-            }],
-            lock_time: 0,
+        version: 1,
+        inputs: vec![],
+        outputs: vec![SvTxOut {
+        satoshis: 10,
+        lock_script,
+        }],
+        lock_time: 0,
         };
         let mut tx2 = SvTx {
-            version: 1,
-            inputs: vec![SvTxIn {
-                prev_output: OutPoint {
-                    hash: SvHash256(tx1.hash().0),
-                    index: 0,
-                },
-                unlock_script: SvScript(vec![]),
-                sequence: 0xffffffff,
-            }],
-            outputs: vec![],
-            lock_time: 0,
+        version: 1,
+        inputs: vec![SvTxIn {
+        prev_output: OutPoint {
+        hash: SvHash256(tx1.hash().0),
+        index: 0,
+        },
+        unlock_script: SvScript(vec![]),
+        sequence: 0xffffffff,
+        }],
+        outputs: vec![],
+        lock_time: 0,
         };
         let mut cache = SigHashCache::new();
         let lock_script_bytes = &tx1.outputs[0].lock_script.0;
@@ -223,8 +312,8 @@ mod tests {
         let prev_txid = our_tx.inputs[0].prev_txid;
         let prev_vout = our_tx.inputs[0].vout;
         let prev_output = Output {
-            value: 10,
-            script_pubkey: tx1.outputs[0].lock_script.0.clone(),
+        value: 10,
+        script_pubkey: tx1.outputs[0].lock_script.0.clone(),
         };
         let mut prev_outputs = HashMap::new();
         prev_outputs.insert((prev_txid, prev_vout), prev_output);
