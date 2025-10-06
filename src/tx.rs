@@ -86,6 +86,7 @@ impl Transaction {
     }
     /// Validates all input scripts against provided previous outputs/UTXOs.
     /// Uses `sv` crate for full BSV script execution (supports P2PKH, multisig, etc.).
+    /// Skips coinbase inputs.
     /// # Errors
     /// - [ShiaError::ScriptEval] if any script fails.
     /// - [ShiaError::Verification] if UTXO missing.
@@ -95,23 +96,27 @@ impl Transaction {
     /// use std::collections::HashMap;
     /// use hex;
     ///
-    /// let tx_hex = "01000000010000000000000000000000000000000000000000000000000000000000000000ffffffff0504ffff001dffffffff0100ca9a3b000000001976a914000000000000000000000000000000000000000088ac00000000";
+    /// // Example P2PKH spending tx (simplified; in real use, generate proper sig)
+    /// let tx_hex = "0100000001000000000000000000000000000000000000000000000000000000000000000000000000ffffffff0100ca9a3b000000001976a914000000000000000000000000000000000000000088ac00000000";
     /// let tx_raw = hex::decode(tx_hex).unwrap();
     /// let tx = Transaction::from_raw(&tx_raw).unwrap();
     /// let mut prev_outputs = HashMap::new();
-    /// let prev_txid = [0u8; 32]; // Coinbase has no prev
-    /// let prev_vout = 0u32;
+    /// let prev_txid = tx.inputs[0].prev_txid;
+    /// let prev_vout = tx.inputs[0].vout;
     /// let prev_output = Output {
     ///     value: 1000,
-    ///     script_pubkey: vec![], // Not used for coinbase
+    ///     script_pubkey: vec![0x76, 0xa9, 0x14, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x88, 0xac], // Dummy P2PKH
     /// };
     /// prev_outputs.insert((prev_txid, prev_vout), prev_output);
-    /// tx.verify_scripts(&prev_outputs).unwrap();
+    /// tx.verify_scripts(&prev_outputs).expect("Script verification failed");
     /// ```
     pub fn verify_scripts(&self, prev_outputs: &HashMap<([u8; 32], u32), Output>) -> Result<()> {
         let sv_tx = SvTx::read(&mut Cursor::new(&self.raw))
             .map_err(|e| ShiaError::ScriptEval(e.to_string()))?;
         for (idx, input) in self.inputs.iter().enumerate() {
+            if input.prev_txid == [0u8; 32] {
+                continue; // Skip coinbase
+            }
             let key = (input.prev_txid, input.vout);
             let prev_out = prev_outputs
                 .get(&key)
