@@ -22,7 +22,7 @@ pub fn validate_atomic(beef: &Beef) -> Result<()> {
 
     while let Some(id) = to_check.pop() {
         if let Some((tx, _)) = tx_map.get(&id) {
-            if !ancestors.insert(*id) {
+            if !ancestors.insert(id) {
                 continue; // Already processed
             }
             for input in &tx.inputs {
