@@ -251,7 +251,7 @@ mod tests {
         assert_eq!(tx.outputs[0].value, 5_000_000_000u64); // 50 BTC = 5 billion sats
         assert_eq!(tx.outputs[0].script_pubkey.len(), 67);
         assert_eq!(tx.locktime, 0);
-        let expected_txid = hex!("3ba3edfd7a7b12b27ac72c3e67768f617fc81bc3888a51323a9fb8aa4b1e5e4a");
+        let expected_txid = hex!("4a5e1e4baab89f3a325188a8c31bc87f619f76673e2cc97ab2127b7afdeda33b");
         assert_eq!(tx.txid(), expected_txid);
     }
     
