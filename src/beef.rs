@@ -158,7 +158,7 @@ impl Beef {
         }
         // Ensure no extra bytes after full parse
         if cursor.position() as usize != bytes.len() {
-            return Err(ShiaError::Parse("Extra bytes after BEEF".to_string()));
+            return Err(ShiaError::Parse("Extra bytes after BEEF"));
         }
         let beef = Self { is_atomic, subject_txid, bumps, txs };
         if beef.is_atomic {
