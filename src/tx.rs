@@ -47,6 +47,7 @@ impl Transaction {
     /// Parses a raw transaction from bytes (BSV format).
     /// # Errors
     /// - IO or VarInt errors during deserialization.
+    /// - Extra bytes after the transaction.
     pub fn from_raw(raw: &[u8]) -> Result<Self> {
         let mut local_cursor = Cursor::new(raw);
         let version = local_cursor.read_u32::<LittleEndian>()?;
@@ -74,15 +75,22 @@ impl Transaction {
         }
         let locktime = local_cursor.read_u32::<LittleEndian>()?;
         let consumed = local_cursor.position() as usize;
-        Ok(Self { version, inputs, outputs, locktime, raw: raw[0..consumed].to_vec() })
+        if consumed != raw.len() {
+            return Err(ShiaError::Parse("Extra bytes after transaction".to_string()));
+        }
+        Ok(Self { version, inputs, outputs, locktime, raw: raw.to_vec() })
     }
     /// Computes TXID (double SHA256 of raw, big-endian).
     pub fn txid(&self) -> [u8; 32] {
-        double_sha256(&self.raw)
+        let mut hash = double_sha256(&self.raw);
+        hash.reverse();
+        hash
     }
     /// Computes Merkle leaf hash (double SHA256 of raw, big-endian).
     pub fn merkle_hash(&self) -> [u8; 32] {
-        double_sha256(&self.raw)
+        let mut hash = double_sha256(&self.raw);
+        hash.reverse();
+        hash
     }
     /// Validates all input scripts against provided previous outputs/UTXOs.
     /// Uses `sv` crate for full BSV script execution (supports P2PKH, multisig, etc.).
