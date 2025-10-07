@@ -36,7 +36,7 @@ use crate::atomic::validate_atomic;
 use crate::bump::Bump;
 use crate::client::BlockHeadersClient;
 use crate::errors::{Result, ShiaError};
-use crate::tx::{Output, Transaction};
+use crate::tx::{Input, Output, Transaction};
 use crate::utils::{read_varint, write_varint};
 use anyhow::anyhow;
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
@@ -86,16 +86,20 @@ impl Beef {
         let mut is_atomic = false;
         let mut subject_txid = None;
         let mut prefix = [0u8; 4];
-        if cursor.read_exact(&mut prefix).is_ok() && prefix == [1, 1, 1, 1] {
-            is_atomic = true;
-            let mut txid = [0u8; 32];
-            cursor.read_exact(&mut txid)?;
-            subject_txid = Some(txid);
-        } else {
-            cursor.set_position(0);
+        let prefix_pos = cursor.position();
+        if let Ok(()) = cursor.read_exact(&mut prefix) {
+            if prefix == [1, 1, 1, 1] {
+                is_atomic = true;
+                let mut txid = [0u8; 32];
+                cursor.read_exact(&mut txid)?;
+                txid.reverse(); // Stored reversed, convert to standard BE
+                subject_txid = Some(txid);
+            } else {
+                cursor.set_position(prefix_pos);
+            }
         }
         let version = cursor.read_u32::<LittleEndian>()?;
-        if version != 0xf1c6c3ef { // BRC-62 magic (LE)
+        if version != 0x0100beefu32 { // BRC-62 magic (LE)
             return Err(ShiaError::InvalidVersion);
         }
         let n_bumps = read_varint(&mut cursor)? as usize;
@@ -107,10 +111,41 @@ impl Beef {
         let mut txs = Vec::with_capacity(n_txs);
         for _ in 0..n_txs {
             let start_pos = cursor.position() as usize;
-            let remaining = &bytes[start_pos..];
-            let tx = Transaction::from_raw(remaining)?;
-            let tx_consumed = tx.raw.len();
-            cursor.set_position((start_pos + tx_consumed) as u64);
+            // Inline transaction parsing using shared cursor (mirrors tx::from_raw logic)
+            let version_tx = cursor.read_u32::<LittleEndian>()?;
+            let num_inputs = read_varint(&mut cursor)? as usize;
+            let mut inputs = Vec::with_capacity(num_inputs);
+            for _ in 0..num_inputs {
+                let mut prev_txid = [0u8; 32];
+                cursor.read_exact(&mut prev_txid)?;
+                prev_txid.reverse(); // To little-endian TXID (BSV raw is LE)
+                let vout = cursor.read_u32::<LittleEndian>()?;
+                let script_len = read_varint(&mut cursor)? as usize;
+                let mut script_sig = vec![0u8; script_len];
+                cursor.read_exact(&mut script_sig)?;
+                let sequence = cursor.read_u32::<LittleEndian>()?;
+                inputs.push(Input { prev_txid, vout, script_sig, sequence });
+            }
+            let num_outputs = read_varint(&mut cursor)? as usize;
+            let mut outputs = Vec::with_capacity(num_outputs);
+            for _ in 0..num_outputs {
+                let value = cursor.read_u64::<LittleEndian>()?;
+                let script_len = read_varint(&mut cursor)? as usize;
+                let mut script_pubkey = vec![0u8; script_len];
+                cursor.read_exact(&mut script_pubkey)?;
+                outputs.push(Output { value, script_pubkey });
+            }
+            let locktime = cursor.read_u32::<LittleEndian>()?;
+            let end_pos = cursor.position() as usize;
+            let tx_raw = bytes[start_pos..end_pos].to_vec();
+            let tx = Transaction {
+                version: version_tx,
+                inputs,
+                outputs,
+                locktime,
+                raw: tx_raw,
+            };
+            // Now read has_bump flag after tx raw
             let has_bump = cursor.read_u8()?;
             let bump_index = if has_bump == 0x01 {
                 Some(read_varint(&mut cursor)? as usize)
@@ -120,6 +155,10 @@ impl Beef {
                 return Err(anyhow!("Invalid has_bump: {}", has_bump).into());
             };
             txs.push((tx, bump_index));
+        }
+        // Ensure no extra bytes after full parse
+        if cursor.position() as usize != bytes.len() {
+            return Err(ShiaError::Parse("Extra bytes after BEEF".to_string()));
         }
         let beef = Self { is_atomic, subject_txid, bumps, txs };
         if beef.is_atomic {
@@ -140,10 +179,12 @@ impl Beef {
         if self.is_atomic {
             buf.extend_from_slice(&[1, 1, 1, 1]); // BRC-95 prefix
             if let Some(txid) = self.subject_txid {
-                buf.extend_from_slice(&txid);
+                let mut rev_txid = txid;
+                rev_txid.reverse(); // Store reversed per spec
+                buf.extend_from_slice(&rev_txid);
             }
         }
-        buf.write_u32::<LittleEndian>(0xf1c6c3ef)?; // BRC-62 version
+        buf.write_u32::<LittleEndian>(0x0100beefu32)?; // BRC-62 version
         write_varint(&mut buf, self.bumps.len() as u64)?;
         for bump in &self.bumps {
             bump.serialize(&mut buf)?;
@@ -330,7 +371,7 @@ mod tests {
     #[test]
     fn test_beef_from_hex_serialize() {
         let tx_hex = "01000000010000000000000000000000000000000000000000000000000000000000000000ffffffff0504ffff001dffffffff0100ca9a3b000000001976a914000000000000000000000000000000000000000088ac00000000";
-        let minimal_beef_hex = format!("efc3c6f10001{}00", tx_hex); // Version LE + nBumps=0 + nTxs=1 + tx + hasBump=00
+        let minimal_beef_hex = format!("efbe00010001{}00", tx_hex); // Version LE + nBumps=0 (00) + nTxs=1 (01) + tx + hasBump=00
         let beef = Beef::from_hex(&minimal_beef_hex).expect("Deserialize failed");
         let serialized = beef.serialize().expect("Serialize failed");
         let serialized_hex = hex::encode(serialized);
@@ -341,7 +382,7 @@ mod tests {
     #[test]
     fn test_beef_verify() {
         let tx_hex = "01000000010000000000000000000000000000000000000000000000000000000000000000ffffffff0504ffff001dffffffff0100ca9a3b000000001976a914000000000000000000000000000000000000000088ac00000000";
-        let minimal_beef_hex = format!("efc3c6f10001{}00", tx_hex);
+        let minimal_beef_hex = format!("efbe00010001{}00", tx_hex);
         let beef = Beef::from_hex(&minimal_beef_hex).expect("Deserialize failed");
         let mock_client = MockHeadersClient; // Always returns true for roots
         assert!(beef.verify(&mock_client).is_ok());
