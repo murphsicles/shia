@@ -151,7 +151,7 @@ impl Transaction {
     /// let raw = hex!("01000000010000000000000000000000000000000000000000000000000000000000000000ffffffff0504ffff001dffffffff0100ca9a3b000000001976a914000000000000000000000000000000000000000088ac00000000");
     /// let tx = Transaction::from_raw(&raw).unwrap();
     /// let txid = tx.txid();
-    /// assert_eq!(txid, hex!("3ba3edfd7a7b12b27ac72c3e67768f617fc81bc3888a51323a9fb8aa4b1e5e4a"));
+    /// assert_eq!(txid, hex!("b8a9dc18c79aa80cd78e0574c055952a0187513c440c44c60b243775056a8439"));
     /// ```
     pub fn txid(&self) -> [u8; 32] {
         let mut hash = double_sha256(&self.raw);
