@@ -78,7 +78,7 @@
 //!
 //! ## Crate Features & Dependencies
 //!
-//! - Relies on `sv` for BSV primitives (tx parsing, script eval).
+//! - Relies on `nour` for BSV primitives (tx parsing, script eval).
 //! - `anyhow` for error chaining; `thiserror` for custom errors.
 //! - No unsafe code; zero-cost abstractions where possible.
 //!

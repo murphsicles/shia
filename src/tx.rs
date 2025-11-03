@@ -1,5 +1,5 @@
 //! BSV Transaction structures and parsing.
-//! Compatible with `sv` crate for script evaluation (BRC-12).
+//! Compatible with `nour` crate for script evaluation (BRC-12).
 //!
 //! Parses raw BSV transactions (version, inputs/outputs, locktime), computes TXID/Merkle hashes,
 //! and verifies input scripts against UTXOs using full BSV execution. Supports coinbase skips.
@@ -38,10 +38,10 @@ use crate::utils::double_sha256;
 use byteorder::{LittleEndian, ReadBytesExt};
 use std::collections::HashMap;
 use std::io::{Cursor, Read};
-use sv::messages::Tx as SvTx;
-use sv::script::{op_codes::OP_CODESEPARATOR, Script as SvScript, TransactionChecker, NO_FLAGS};
-use sv::transaction::sighash::SigHashCache;
-use sv::util::Serializable;
+use nour::messages::Tx as SvTx;
+use nour::script::{op_codes::OP_CODESEPARATOR, Script as SvScript, TransactionChecker, NO_FLAGS};
+use nour::transaction::sighash::SigHashCache;
+use nour::util::Serializable;
 
 /// Input for a transaction.
 ///
@@ -168,7 +168,7 @@ impl Transaction {
 
     /// Validates all input scripts against provided previous outputs/UTXOs.
     ///
-    /// Uses `sv` crate for full BSV script execution (supports P2PKH, multisig, etc.).
+    /// Uses `nour` crate for full BSV script execution (supports P2PKH, multisig, etc.).
     /// Skips coinbase inputs (prev_txid all zeros).
     /// Concat sig + pubkey for eval; requires sighash forkid=false for legacy.
     ///
@@ -258,10 +258,10 @@ mod tests {
     #[test]
     fn transaction_verify_scripts() {
         use secp256k1::{Secp256k1, SecretKey, PublicKey};
-        use sv::messages::{OutPoint, TxIn as SvTxIn, TxOut as SvTxOut};
-        use sv::script::Script as SvScript;
-        use sv::util::{Hash256 as SvHash256, hash160};
-        use sv::transaction::sighash::{SIGHASH_ALL, SIGHASH_FORKID};
+        use nour::messages::{OutPoint, TxIn as SvTxIn, TxOut as SvTxOut};
+        use nour::script::Script as SvScript;
+        use nour::util::{Hash256 as SvHash256, hash160};
+        use nour::transaction::sighash::{SIGHASH_ALL, SIGHASH_FORKID};
         // Simple P2PKH from rust-sv tests
         let private_key = [1u8; 32];
         let secp = Secp256k1::new();
@@ -270,41 +270,41 @@ mod tests {
         let pk_bytes = public_key.serialize();
         let pkh = hash160(&pk_bytes);
         let mut lock_script = SvScript::new();
-        lock_script.append(sv::script::op_codes::OP_DUP);
-        lock_script.append(sv::script::op_codes::OP_HASH160);
-        lock_script.append_data(&pkh.0);
-        lock_script.append(sv::script::op_codes::OP_EQUALVERIFY);
-        lock_script.append(sv::script::op_codes::OP_CHECKSIG);
+        lock_script.append(nour::script::op_codes::OP_DUP);
+        lock_script.append(nour::script::op_codes::OP_HASH160);
+        let _ = lock_script.append_data(&pkh.0);
+        lock_script.append(nour::script::op_codes::OP_EQUALVERIFY);
+        lock_script.append(nour::script::op_codes::OP_CHECKSIG);
         let tx1 = SvTx {
-        version: 1,
-        inputs: vec![],
-        outputs: vec![SvTxOut {
-        satoshis: 10,
-        lock_script,
-        }],
-        lock_time: 0,
+            version: 1,
+            inputs: vec![],
+            outputs: vec![SvTxOut {
+                satoshis: 10,
+                lock_script,
+            }],
+            lock_time: 0,
         };
         let mut tx2 = SvTx {
-        version: 1,
-        inputs: vec![SvTxIn {
-        prev_output: OutPoint {
-        hash: SvHash256(tx1.hash().0),
-        index: 0,
-        },
-        unlock_script: SvScript(vec![]),
-        sequence: 0xffffffff,
-        }],
-        outputs: vec![],
-        lock_time: 0,
+            version: 1,
+            inputs: vec![SvTxIn {
+                prev_output: OutPoint {
+                    hash: SvHash256(tx1.hash().0),
+                    index: 0,
+                },
+                unlock_script: SvScript(vec![]),
+                sequence: 0xffffffff,
+            }],
+            outputs: vec![],
+            lock_time: 0,
         };
         let mut cache = SigHashCache::new();
         let lock_script_bytes = &tx1.outputs[0].lock_script.0;
         let sighash_type = SIGHASH_ALL | SIGHASH_FORKID;
-        let sig_hash = sv::transaction::sighash::sighash(&tx2, 0, lock_script_bytes, 10, sighash_type, &mut cache).unwrap();
-        let signature = sv::transaction::generate_signature(&private_key, &sig_hash, sighash_type).unwrap();
+        let sig_hash = nour::transaction::sighash::sighash(&tx2, 0, lock_script_bytes, 10, sighash_type, &mut cache).unwrap();
+        let signature = nour::transaction::generate_signature(&private_key, &sig_hash, sighash_type).unwrap();
         let mut unlock_script = SvScript::new();
-        unlock_script.append_data(&signature);
-        unlock_script.append_data(&pk_bytes);
+        let _ = unlock_script.append_data(&signature);
+        let _ = unlock_script.append_data(&pk_bytes);
         tx2.inputs[0].unlock_script = unlock_script;
         let mut tx2_bytes = Vec::new();
         tx2.write(&mut tx2_bytes).unwrap();
@@ -312,8 +312,8 @@ mod tests {
         let prev_txid = our_tx.inputs[0].prev_txid;
         let prev_vout = our_tx.inputs[0].vout;
         let prev_output = Output {
-        value: 10,
-        script_pubkey: tx1.outputs[0].lock_script.0.clone(),
+            value: 10,
+            script_pubkey: tx1.outputs[0].lock_script.0.clone(),
         };
         let mut prev_outputs = HashMap::new();
         prev_outputs.insert((prev_txid, prev_vout), prev_output);
