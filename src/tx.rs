@@ -38,10 +38,10 @@ use crate::utils::double_sha256;
 use byteorder::{LittleEndian, ReadBytesExt};
 use std::collections::HashMap;
 use std::io::{Cursor, Read};
-use sv::messages::Tx as SvTx;
-use sv::script::{op_codes::OP_CODESEPARATOR, Script as SvScript, TransactionChecker, NO_FLAGS};
-use sv::transaction::sighash::SigHashCache;
-use sv::util::Serializable;
+use nour::messages::Tx as SvTx;
+use nour::script::{op_codes::OP_CODESEPARATOR, Script as SvScript, TransactionChecker, NO_FLAGS};
+use nour::transaction::sighash::SigHashCache;
+use nour::util::Serializable;
 
 /// Input for a transaction.
 ///
@@ -168,7 +168,7 @@ impl Transaction {
 
     /// Validates all input scripts against provided previous outputs/UTXOs.
     ///
-    /// Uses `sv` crate for full BSV script execution (supports P2PKH, multisig, etc.).
+    /// Uses `bour` crate for full BSV script execution (supports P2PKH, multisig, etc.).
     /// Skips coinbase inputs (prev_txid all zeros).
     /// Concat sig + pubkey for eval; requires sighash forkid=false for legacy.
     ///
