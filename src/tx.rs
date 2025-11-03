@@ -39,7 +39,7 @@ use byteorder::{LittleEndian, ReadBytesExt};
 use std::collections::HashMap;
 use std::io::{Cursor, Read};
 use nour::messages::Tx as SvTx;
-use bour::script::{op_codes::OP_CODESEPARATOR, Script as SvScript, TransactionChecker, NO_FLAGS};
+use nour::script::{op_codes::OP_CODESEPARATOR, Script as SvScript, TransactionChecker, NO_FLAGS};
 use nour::transaction::sighash::SigHashCache;
 use nour::util::Serializable;
 
