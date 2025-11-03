@@ -270,11 +270,11 @@ mod tests {
         let pk_bytes = public_key.serialize();
         let pkh = hash160(&pk_bytes);
         let mut lock_script = SvScript::new();
-        lock_script.append(sv::script::op_codes::OP_DUP);
-        lock_script.append(sv::script::op_codes::OP_HASH160);
+        lock_script.append(nour::script::op_codes::OP_DUP);
+        lock_script.append(nour::script::op_codes::OP_HASH160);
         lock_script.append_data(&pkh.0);
-        lock_script.append(sv::script::op_codes::OP_EQUALVERIFY);
-        lock_script.append(sv::script::op_codes::OP_CHECKSIG);
+        lock_script.append(nour::script::op_codes::OP_EQUALVERIFY);
+        lock_script.append(nour::script::op_codes::OP_CHECKSIG);
         let tx1 = SvTx {
         version: 1,
         inputs: vec![],
@@ -300,8 +300,8 @@ mod tests {
         let mut cache = SigHashCache::new();
         let lock_script_bytes = &tx1.outputs[0].lock_script.0;
         let sighash_type = SIGHASH_ALL | SIGHASH_FORKID;
-        let sig_hash = sv::transaction::sighash::sighash(&tx2, 0, lock_script_bytes, 10, sighash_type, &mut cache).unwrap();
-        let signature = sv::transaction::generate_signature(&private_key, &sig_hash, sighash_type).unwrap();
+        let sig_hash = nour::transaction::sighash::sighash(&tx2, 0, lock_script_bytes, 10, sighash_type, &mut cache).unwrap();
+        let signature = nour::transaction::generate_signature(&private_key, &sig_hash, sighash_type).unwrap();
         let mut unlock_script = SvScript::new();
         unlock_script.append_data(&signature);
         unlock_script.append_data(&pk_bytes);
