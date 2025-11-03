@@ -1,5 +1,5 @@
 //! BSV Transaction structures and parsing.
-//! Compatible with `sv` crate for script evaluation (BRC-12).
+//! Compatible with `nour` crate for script evaluation (BRC-12).
 //!
 //! Parses raw BSV transactions (version, inputs/outputs, locktime), computes TXID/Merkle hashes,
 //! and verifies input scripts against UTXOs using full BSV execution. Supports coinbase skips.
@@ -38,10 +38,10 @@ use crate::utils::double_sha256;
 use byteorder::{LittleEndian, ReadBytesExt};
 use std::collections::HashMap;
 use std::io::{Cursor, Read};
-use sv::messages::Tx as SvTx;
-use sv::script::{op_codes::OP_CODESEPARATOR, Script as SvScript, TransactionChecker, NO_FLAGS};
-use sv::transaction::sighash::SigHashCache;
-use sv::util::Serializable;
+use nour::messages::Tx as SvTx;
+use bour::script::{op_codes::OP_CODESEPARATOR, Script as SvScript, TransactionChecker, NO_FLAGS};
+use nour::transaction::sighash::SigHashCache;
+use nour::util::Serializable;
 
 /// Input for a transaction.
 ///
@@ -168,7 +168,7 @@ impl Transaction {
 
     /// Validates all input scripts against provided previous outputs/UTXOs.
     ///
-    /// Uses `sv` crate for full BSV script execution (supports P2PKH, multisig, etc.).
+    /// Uses `nour` crate for full BSV script execution (supports P2PKH, multisig, etc.).
     /// Skips coinbase inputs (prev_txid all zeros).
     /// Concat sig + pubkey for eval; requires sighash forkid=false for legacy.
     ///
@@ -258,10 +258,10 @@ mod tests {
     #[test]
     fn transaction_verify_scripts() {
         use secp256k1::{Secp256k1, SecretKey, PublicKey};
-        use sv::messages::{OutPoint, TxIn as SvTxIn, TxOut as SvTxOut};
-        use sv::script::Script as SvScript;
-        use sv::util::{Hash256 as SvHash256, hash160};
-        use sv::transaction::sighash::{SIGHASH_ALL, SIGHASH_FORKID};
+        use nour::messages::{OutPoint, TxIn as SvTxIn, TxOut as SvTxOut};
+        use nour::script::Script as SvScript;
+        use nour::util::{Hash256 as SvHash256, hash160};
+        use nour::transaction::sighash::{SIGHASH_ALL, SIGHASH_FORKID};
         // Simple P2PKH from rust-sv tests
         let private_key = [1u8; 32];
         let secp = Secp256k1::new();
