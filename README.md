@@ -16,7 +16,7 @@ A Rust crate implementing the BSV BEEF (Background Evaluation Extended Format) p
 - **BUMP Integration**: Unique Merkle proofs for tx inclusion, with deduplication during build.
 - **Extensibility**: `BlockHeadersClient` trait for custom header oracles (e.g., local index, remote Pulse API). Optional Paymail envelope wrapping (feature-gated).
 - **Error Handling**: Detailed errors via `thiserror` (e.g., `Parse("Extra bytes")`, `Verification("Missing UTXO")`, `AtomicMismatch`).
-- **Dependencies**: Lean stack with `rust-sv` for BSV-specific tx/script handling (P2P, sighash, etc.).
+- **Dependencies**: Lean stack with `nour` for BSV-specific tx/script handling (P2P, sighash, etc.).
 
 ## Installation 📦
 
@@ -41,8 +41,8 @@ For Paymail support (optional):
 shia = { version = "0.1.0", features = ["paymail"] }
 ```
 
-- Requires Rust 1.82+ for edition 2024 features.
-- CI workflow tested up to Rust 1.90. ✅
+- Requires Rust 1.85+ for edition 2024 features.
+- CI workflow tested up to Rust 1.91. ✅
 - No external services needed—pure offline SPV.
 
 ## Quick Start 📖
@@ -166,4 +166,4 @@ Issues/PRs at [GitHub](https://github.com/murphsicles/shia/issues). Focus on BSV
 
 ## Contact 📧
 
-[murphsicles](https://github.com/murphsicles) – Built for BSV Freedom Stack & Teranode SPV. Questions? Open an issue!
+[murphsicles](https://github.com/murphsicles) – Built for the BSV Freedom Stack & Galaxy Node architecture. Questions? Open an issue!
