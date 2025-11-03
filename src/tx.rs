@@ -272,30 +272,30 @@ mod tests {
         let mut lock_script = SvScript::new();
         lock_script.append(nour::script::op_codes::OP_DUP);
         lock_script.append(nour::script::op_codes::OP_HASH160);
-        lock_script.append_data(&pkh.0);
+        let _ = lock_script.append_data(&pkh.0);
         lock_script.append(nour::script::op_codes::OP_EQUALVERIFY);
         lock_script.append(nour::script::op_codes::OP_CHECKSIG);
         let tx1 = SvTx {
-        version: 1,
-        inputs: vec![],
-        outputs: vec![SvTxOut {
-        satoshis: 10,
-        lock_script,
-        }],
-        lock_time: 0,
+            version: 1,
+            inputs: vec![],
+            outputs: vec![SvTxOut {
+                satoshis: 10,
+                lock_script,
+            }],
+            lock_time: 0,
         };
         let mut tx2 = SvTx {
-        version: 1,
-        inputs: vec![SvTxIn {
-        prev_output: OutPoint {
-        hash: SvHash256(tx1.hash().0),
-        index: 0,
-        },
-        unlock_script: SvScript(vec![]),
-        sequence: 0xffffffff,
-        }],
-        outputs: vec![],
-        lock_time: 0,
+            version: 1,
+            inputs: vec![SvTxIn {
+                prev_output: OutPoint {
+                    hash: SvHash256(tx1.hash().0),
+                    index: 0,
+                },
+                unlock_script: SvScript(vec![]),
+                sequence: 0xffffffff,
+            }],
+            outputs: vec![],
+            lock_time: 0,
         };
         let mut cache = SigHashCache::new();
         let lock_script_bytes = &tx1.outputs[0].lock_script.0;
@@ -303,8 +303,8 @@ mod tests {
         let sig_hash = nour::transaction::sighash::sighash(&tx2, 0, lock_script_bytes, 10, sighash_type, &mut cache).unwrap();
         let signature = nour::transaction::generate_signature(&private_key, &sig_hash, sighash_type).unwrap();
         let mut unlock_script = SvScript::new();
-        unlock_script.append_data(&signature);
-        unlock_script.append_data(&pk_bytes);
+        let _ = unlock_script.append_data(&signature);
+        let _ = unlock_script.append_data(&pk_bytes);
         tx2.inputs[0].unlock_script = unlock_script;
         let mut tx2_bytes = Vec::new();
         tx2.write(&mut tx2_bytes).unwrap();
@@ -312,8 +312,8 @@ mod tests {
         let prev_txid = our_tx.inputs[0].prev_txid;
         let prev_vout = our_tx.inputs[0].vout;
         let prev_output = Output {
-        value: 10,
-        script_pubkey: tx1.outputs[0].lock_script.0.clone(),
+            value: 10,
+            script_pubkey: tx1.outputs[0].lock_script.0.clone(),
         };
         let mut prev_outputs = HashMap::new();
         prev_outputs.insert((prev_txid, prev_vout), prev_output);
