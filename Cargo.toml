@@ -3,6 +3,11 @@ name = "shia"
 version = "0.1.0"
 edition = "2024"
 license-file = "LICENSE"
+description = "The BSV BEEF Protocol Reference Implementation"
+repository = "https://github.com/murphsicles/shia"
+keywords = ["bitcoin-sv", "blockchain", "crypto", "transactions", "p2p"]
+categories = ["cryptography", "network-programming"]
+readme = "README.md"
 
 [dependencies]
 anyhow = "1.0.100"
