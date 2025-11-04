@@ -5,13 +5,13 @@
 [![Dependencies](https://deps.rs/repo/github/murphsicles/shia/status.svg)](https://deps.rs/repo/github/murphsicles/shia)
 [![CI](https://img.shields.io/github/actions/workflow/status/murphsicles/shia/ci.yml?branch=main)](https://github.com/murphsicles/shia/actions/workflows/ci.yml)
 
-A Rust crate implementing the BSV BEEF (Background Evaluation Extended Format) protocol ([BRC-62](https://github.com/bitcoin-sv/BIPs/blob/master/brc-0062.mediawiki)) for Simplified Payment Verification (SPV) on Bitcoin SV. It supports parsing, serialization, building from transaction DAGs, and verification of transactions with Merkle proofs using BUMP ([BRC-74](https://github.com/bitcoin-sv/BIPs/blob/master/brc-0074.mediawiki)). Designed for integration into BSV wallet stacks, with script evaluation via the `rust-sv` crate. Includes support for atomic BEEF ([BRC-95](https://github.com/bitcoin-sv/BIPs/blob/master/brc-0095.mediawiki)) and hooks for Paymail envelopes ([BRC-70](https://github.com/bitcoin-sv/BIPs/blob/master/brc-0070.mediawiki)).
+A Rust crate implementing the BSV BEEF (Background Evaluation Extended Format) protocol ([BRC-62](https://github.com/bitcoin-sv/BIPs/blob/master/brc-0062.mediawiki)) for Simplified Payment Verification (SPV) on Bitcoin SV. It supports parsing, serialization, building from transaction DAGs, and verification of transactions with Merkle proofs using BUMP ([BRC-74](https://github.com/bitcoin-sv/BIPs/blob/master/brc-0074.mediawiki)). Designed for integration into BSV wallet stacks, with script evaluation via the `nour` crate. Includes support for atomic BEEF ([BRC-95](https://github.com/bitcoin-sv/BIPs/blob/master/brc-0095.mediawiki)) and hooks for Paymail envelopes ([BRC-70](https://github.com/bitcoin-sv/BIPs/blob/master/brc-0070.mediawiki)).
 
 ## Features 🔧
 
 - **Parsing & Serialization**: Deserialize from hex/binary and serialize BEEF data, including atomic prefixes and variable-length tx sections.
 - **Building**: Construct BEEF from subject transaction, ancestors (TXID → Tx map), and bump proofs (TXID → Bump map) with topological sorting via Kahn's algorithm (cycle detection included).
-- **Verification**: Full SPV validation including Merkle root checks against block headers, UTXO tracking, value balance (fees ≥ 0, skipping coinbase), and script execution (P2PKH, multisig, etc., via `rust-sv`).
+- **Verification**: Full SPV validation including Merkle root checks against block headers, UTXO tracking, value balance (fees ≥ 0, skipping coinbase), and script execution (P2PKH, multisig, etc., via `nour`).
 - **Atomic BEEF Support**: Enforce BRC-95 atomicity—only subject tx + direct ancestors, no siblings or unrelated txs—for focused micropayment proofs.
 - **BUMP Integration**: Unique Merkle proofs for tx inclusion, with deduplication during build.
 - **Extensibility**: `BlockHeadersClient` trait for custom header oracles (e.g., local index, remote Pulse API). Optional Paymail envelope wrapping (feature-gated).
@@ -147,7 +147,7 @@ Example failing case (pre-fix): Extra bytes in tx raw → `Parse("Extra bytes af
 ## Dependencies 📚
 
 - **Core**: `byteorder`, `hex`, `thiserror`, `anyhow`, `sha2`.
-- **BSV**: `sv` (from GitHub: `git+https://github.com/murphsicles/rust-sv.git`).
+- **BSV**: `nour` (from GitHub: `git+https://github.com/murphsicles/nour.git`).
 - No runtime deps on services—offline-first.
 
 ## License 📄
